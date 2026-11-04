@@ -16,7 +16,7 @@
 | 内核 | `rekobox_core.exe` = sing-box **1.12.19-neko-1** + libneko |
 | 编译器 | MinGW-w64 GCC 13.1（原工程 CI 用 MSVC 14.2） |
 | 构建 | CMake 3.31 + Ninja |
-| 产物 | `deployment/windows64/`（约 95 MB），打包 `dist/Rekobox-1.0.1-windows-x64-qt.zip`（35 MB） |
+| 产物 | `deployment/windows64/`（约 95 MB），打包 `dist/Rekobox-1.0.2-windows-x64-qt.zip`（35 MB） |
 | 验证 | GUI 离屏启动 10 s 无崩溃；内核打印版本并进入 gRPC 等待态 |
 
 ---

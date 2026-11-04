@@ -104,10 +104,6 @@
         <translation>连接统计</translation>
     </message>
     <message>
-        <source>Include Pre-release when checking update</source>
-        <translation>检查更新时包括 Pre-release 版本</translation>
-    </message>
-    <message>
         <source>Set custom icon</source>
         <translation>自定义图标</translation>
     </message>
@@ -1566,28 +1562,8 @@ Direct: %2</source>
         <translation>更新</translation>
     </message>
     <message>
-        <source>No update</source>
-        <translation>无更新</translation>
-    </message>
-    <message>
-        <source>Open in browser</source>
-        <translation>浏览器打开</translation>
-    </message>
-    <message>
         <source>Close</source>
         <translation>关闭</translation>
-    </message>
-    <message>
-        <source>Update is ready, restart to install?</source>
-        <translation>更新已下载好，重启应用？</translation>
-    </message>
-    <message>
-        <source>Update found: %1
-Release note:
-%2</source>
-        <translation>检测到更新: %1
-更新日志:
-%2</translation>
     </message>
     <message>
         <source>Unavailable</source>

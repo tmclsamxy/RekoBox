@@ -40,10 +40,6 @@
         <translation>URL теста загрузки</translation>
     </message>
     <message>
-        <source>Include Pre-release when checking update</source>
-        <translation>Проверять пре-релизы при обновлениях</translation>
-    </message>
-    <message>
         <source>System proxy format</source>
         <translation>Формат строки системного прокси</translation>
     </message>
@@ -1618,28 +1614,8 @@ Deleted %3 Profiles:
         <translation>Обновление</translation>
     </message>
     <message>
-        <source>No update</source>
-        <translation>Нет обновлений</translation>
-    </message>
-    <message>
-        <source>Update found: %1
-Release note:
-%2</source>
-        <translation>Найдено обновление: %1
-Примечания к выпуску:
-%2</translation>
-    </message>
-    <message>
-        <source>Open in browser</source>
-        <translation>Открыть в браузере</translation>
-    </message>
-    <message>
         <source>Close</source>
         <translation>Закрыть</translation>
-    </message>
-    <message>
-        <source>Update is ready, restart to install?</source>
-        <translation>Обновление готово, перезапуститься для установки?</translation>
     </message>
     <message>
         <source>Used: %1 Remain: %2 Expire: %3</source>

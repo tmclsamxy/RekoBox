@@ -22,6 +22,15 @@ Rekobox/
 | **Windows (Qt)** | `RekoboxForWindowsQt/` | nekoray 4.0.1 移植：Qt6.7 + MinGW 构建通过，sing-box 1.9.7-neko 内核，已实机启动 |
 | **macOS** | `RekoboxForMac/` | 规划中，界面层可复用 Windows 的 Compose 代码 |
 
+## 发布
+
+仓库：https://github.com/tmclsamxy/RekoBox
+
+| 平台 | 版本 | 产物 | 链接 |
+|---|---|---|---|
+| Android | v1.0.1 | 4 个 split APK | [releases/tag/v1.0.1](https://github.com/tmclsamxy/RekoBox/releases/tag/v1.0.1) |
+| Windows (Qt) | win-v1.0.0 | `Rekobox-1.0.0-windows-x64-qt.zip` | [releases/tag/win-v1.0.0](https://github.com/tmclsamxy/RekoBox/releases/tag/win-v1.0.0) |
+
 ## 架构差异（为什么不是一套代码编译两次）
 
 | 关注点 | Android | Windows |

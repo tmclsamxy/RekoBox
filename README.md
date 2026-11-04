@@ -16,7 +16,7 @@ Rekobox/
 
 | 平台 | 目录 | 当前状态 |
 |---|---|---|
-| **Android** | `RekoboxForAndroid/` | v1.0.0 已发布；`io.rekobox`，4 个 split ABI；改名基于 NekoBox |
+| **Android** | `RekoboxForAndroid/` | v1.0.1 已发布；`io.rekobox`，4 个 split ABI；改名基于 NekoBox |
 | **Windows** | `RekoboxForWindows/` | 可用闭环：9 种协议、订阅、节点库、托盘、系统代理 / TUN |
 | **macOS** | `RekoboxForMac/` | 规划中，界面层可复用 Windows 的 Compose 代码 |
 

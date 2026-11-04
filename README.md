@@ -1,39 +1,60 @@
 # RekoBox for Android
 
-> **RekoBox** 是 [NekoBox for Android](https://github.com/MatsuriDayo/NekoBoxForAndroid) 的下游再发行版（fork），
-> 遵循上游 **GPL-3.0** 许可证发布。上游版权归 MatsuriDayo 及 [AUTHORS](AUTHORS) 中的各位贡献者所有；
-> 本仓库仅重命名应用标识与界面文案，核心引擎（sing-box / libcore）与上游保持一致。
-> 按 GPL-3.0 要求，本项目的完整源代码随二进制一并提供。
+基于 [NekoBox for Android](https://github.com/MatsuriDayo/NekoBoxForAndroid) 的下游再发行版，
+遵循 **GPL-3.0**。核心引擎（sing-box / libcore）与上游一致，本仓库主要改动为应用标识与包名重命名。
+上游版权归 MatsuriDayo 及 [AUTHORS](AUTHORS) 中的贡献者所有。
 
-[![API](https://img.shields.io/badge/API-21%2B-brightgreen.svg?style=flat)](https://android-arsenal.com/api?level=21)
-[![Releases](https://img.shields.io/github/v/release/tmclsamxy/RekoBoxForAndroid)](https://github.com/tmclsamxy/RekoBoxForAndroid/releases)
-[![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-orange.svg)](https://www.gnu.org/licenses/gpl-3.0)
-[![Contributors](https://img.shields.io/github/contributors/tmclsamxy/RekoBoxForAndroid)](https://github.com/tmclsamxy/RekoBoxForAndroid/graphs/contributors)
+- 包名 `io.rekobox` · minSdk 21 · targetSdk 35
+- 构建：AGP 8.8.1 / Gradle 8.10.2 / Kotlin 2.0.21 / NDK r28
 
-## 免责声明
+## 架构
 
-> 免责声明：本项目仅用于技术研究与代码学习之目的，不提供任何形式的网络代理服务。请勿将本项目用于违反当地法律法规的任何活动。请勿在生产环境中使用本项目，使用者应自行承担使用本项目可能带来的全部风险。若您下载或引用本项目，请在 24 小时内自行删除相关内容，并避免长期存储、分享或传播本项目的任何部分。**作者保留随时修改、更新或移除本项目及其内容的权利，恕不另行通知。**
-> 
-> Disclaimer: This project is intended solely for technical research and code learning purposes and does not provide any form of network proxy service. Please do not use this project for any activities that violate local laws and regulations. Do not use this project in production environments. Users are fully responsible for any risks that may arise from using this project. If you download or reference this project, please delete all related content within 24 hours and avoid long-term storage, distribution, or dissemination of any part of this project. **The author reserves the right to modify, update, or remove any part of this project or its contents at any time without prior notice.**
+```
+app/                     Android 前端（Kotlin，View + Fragment）
+  ├─ bg/                 ProxyService / VpnService / AIDL binder
+  ├─ fmt/                各协议分享链接与订阅解析
+  ├─ database/           Room 实体与配置存储
+  └─ ui/  widget/        界面
+libcore/                 Go 模块，封装 sing-box，经 gomobile 编成 libcore.aar
+hev-socks5-tunnel/       C 子模块，tun2socks，编成 libhev-socks5-tunnel.so
+```
 
-## 下载 / Downloads
+`app/build.gradle.kts` 依赖 `app/libs/libcore.aar` 与 `app/src/main/jniLibs/*/*.so`，
+两者都不入库，构建前需先生成。
 
-[![GitHub All Releases](https://img.shields.io/github/downloads/tmclsamxy/RekoBoxForAndroid/total?label=downloads-total&logo=github&style=flat-square)](https://github.com/tmclsamxy/RekoBoxForAndroid/releases)
+## 构建
 
-[GitHub Releases 下载](https://github.com/tmclsamxy/RekoBoxForAndroid/releases)
+前置：JDK 17、Android SDK（platform 35 / build-tools 35.0.0+）、NDK、Go 1.25+、
+[gomobile `master2` 分支](https://github.com/MatsuriDayo/gomobile)（装好后把二进制改名为
+`gomobile-matsuri` / `gobind-matsuri`）。`libcore/go.mod` 用 `../../` 引用 sing-box 与 libneko，
+两份源码需放在仓库父目录。
 
-**Google Play 版本自 2024 年 5 月起已被第三方控制，为非开源版本，请不要下载。**
+```bash
+# 1) 原生核心（约 8 分钟，4 个 ABI）
+cd libcore
+gomobile-matsuri bind -androidapi 21 -cache "$(pwd)/.build" -trimpath -ldflags='-s -w' \
+  -tags='with_conntrack,with_gvisor,with_quic,with_wireguard,with_utls,with_clash_api' .
+cp libcore.aar ../app/libs/
 
-**The Google Play version has been controlled by a third party since May 2024 and is a non-open
-source version. Please do not download it.**
+# 2) tun2socks
+cd .. && bash buildScript/compile-hevtun.sh
 
-## 更新日志 & Telegram 发布频道 / Changelog & Telegram Channel
+# 3) 签名与 SDK 路径
+cat > local.properties <<'EOF'
+sdk.dir=/path/to/Android/Sdk
+ndk.dir=/path/to/Android/Sdk/ndk/28.2.13676358
+KEYSTORE_PASS=***
+ALIAS_NAME=rekobox
+ALIAS_PASS=***
+EOF
 
-https://t.me/rekobox
+# 4) 打包（oss / fdroid / play / preview）
+./gradlew app:assembleOssRelease
+```
 
-## 项目主页 & 文档 / Homepage & Documents
+Windows 本机构建的完整踩坑记录见 `../docs/03-release.md`；一键脚本 `tools/build-release.sh`。
 
-https://matsuridayo.github.io
+产物：`app/build/outputs/apk/oss/release/RekoBox-<version>-<abi>.apk`（按 ABI 分包）。
 
 ## 支持的代理协议 / Supported Proxy Protocols
 
@@ -226,10 +247,7 @@ https://matsuridayo.github.io
 </code></pre>
 </details>
 
-请到[这里](https://matsuridayo.github.io/nb4a-plugin/)下载插件以获得完整的代理支持.
-
-Please visit [here](https://matsuridayo.github.io/nb4a-plugin/) to download plugins for full proxy
-supports.
+带 `-plugin` 后缀的协议需要额外安装对应的上游插件 APK（Android 原生插件机制，本仓库保持协议兼容）。
 
 ## 支持的订阅格式 / Supported Subscription Format
 
@@ -242,25 +260,6 @@ supports.
 * sing-box outbound
 
 Only resolving outbound, i.e. nodes, is supported. Information such as diversion rules are ignored.
-
-## 捐助 / Donate
-
-<details>
-
-如果这个项目对您有帮助, 可以通过捐赠的方式帮助我们维持这个项目.
-
-捐赠满等额 50 USD 可以在「[捐赠榜](https://mtrdnt.pages.dev/donation_list)」显示头像, 如果您未被添加到这里,
-欢迎联系我们补充.
-
-Donations of 50 USD or more can display your avatar on
-the [Donation List](https://mtrdnt.pages.dev/donation_list). If you are not added here, please
-contact us to add it.
-
-USDT TRC20
-
-`TFVcx36pVLuCWLbWiMdT5KP2PsfQ2SJVEZ`
-
-</details>
 
 ## Credits
 
@@ -281,6 +280,6 @@ Web Dashboard:
 
 - [Yacd-meta](https://github.com/MetaCubeX/Yacd-meta)
 
-## Contributors
+## 许可证
 
-![Contributors](https://contrib.rocks/image?repo=tmclsamxy/RekoBoxForAndroid)
+[GPL-3.0](LICENSE)。分发二进制时须同时提供完整源码；保留 `LICENSE`、`AUTHORS` 与原版权声明。

@@ -11,10 +11,6 @@ dist/
 **/.kotlin/
 **/local.properties
 
-# Windows 端随包内核（由 scripts/fetch-core.ps1 下载）
-RekoboxForWindows/runtime/windows/*.exe
-RekoboxForWindows/runtime/windows/*.dll
-
 # 系统文件
 .DS_Store
 Thumbs.db
@@ -24,8 +20,8 @@ Thumbs.db
 /libneko/
 /sing-box/
 
-# Qt 版 Windows 客户端：三方内核源码与构建产物都不入库
-/RekoboxForWindowsQt/_deps/
-/RekoboxForWindowsQt/libs/deps/
-/RekoboxForWindowsQt/deployment/
-/RekoboxForWindowsQt/res/_geodata/
+# Windows 客户端：三方内核源码与构建产物都不入库
+/RekoboxForWindows/_deps/
+/RekoboxForWindows/libs/deps/
+/RekoboxForWindows/deployment/
+/RekoboxForWindows/res/_geodata/

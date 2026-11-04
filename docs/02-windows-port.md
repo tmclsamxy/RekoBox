@@ -2,7 +2,8 @@
 
 > 目标：基于 `RekoboxForAndroid` 的引擎与协议栈，产出一个可在 Windows 10/11 x64 原生运行、
 > 带图形界面、支持 TUN 与系统代理两种模式的代理客户端。
-> 骨架位置：`D:/WorkBuddy/Rekobox/RekoboxForWindows`（已建好，可就地 `./gradlew run`）
+> **注意**：这是一个已被放弃的设计（Compose Desktop 重写版），工程已从仓库移除；
+> 现在 Windows 端以 `RekoboxForWindows/`（nekoray + Qt6）为准。本文仅作设计参考保留。
 
 ---
 

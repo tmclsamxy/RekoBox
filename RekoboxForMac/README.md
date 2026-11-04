@@ -4,8 +4,8 @@
 
 ## 计划
 
-- 界面层直接复用 `RekoboxForWindows/app/src/main/kotlin/io/rekobox/win/ui/`
-  （Compose Desktop 的 UI 代码跨平台，`MenuBar`/`Tray`/文件路径是少数需要分支的地方）
+- 界面层参考 `RekoboxForWindows/`（Qt Widgets）：Qt 跨平台，但 `sys/windows/` 下的
+  提权、注册表、WinINet 要换成本地实现，托盘走 `QSystemTrayIcon`
 - 内核：`sing-box` 官方 macOS 二进制（arm64 + amd64），与 Windows 版一样走子进程 + Clash API
 - 隧道：sing-box 自带 `tun` 入站 + utun，需要 `NetworkExtension` 或 root 权限；
   只做系统代理则不需要特权

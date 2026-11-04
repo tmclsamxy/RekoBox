@@ -6,6 +6,7 @@
 Rekobox/
 ├── RekoboxForAndroid/     Android 版（Kotlin + gomobile 内核，包名 io.rekobox）
 ├── RekoboxForWindows/     Windows 版（Compose Desktop + sing-box 子进程）
+├── RekoboxForWindowsQt/   Windows Qt 版（nekoray 移植，Qt6 + MinGW）
 ├── RekoboxForMac/         macOS 版（规划中）
 ├── docs/                  改名清单、移植方案、发布流程
 ├── sing-box/              内核源码（Android libcore 的 go.mod replace 目标，不入库）
@@ -18,6 +19,7 @@ Rekobox/
 |---|---|---|
 | **Android** | `RekoboxForAndroid/` | v1.0.1 已发布；`io.rekobox`，4 个 split ABI；改名基于 NekoBox |
 | **Windows** | `RekoboxForWindows/` | 可用闭环：9 种协议、订阅、节点库、托盘、系统代理 / TUN |
+| **Windows (Qt)** | `RekoboxForWindowsQt/` | nekoray 4.0.1 移植：Qt6.7 + MinGW 构建通过，sing-box 1.9.7-neko 内核，已实机启动 |
 | **macOS** | `RekoboxForMac/` | 规划中，界面层可复用 Windows 的 Compose 代码 |
 
 ## 架构差异（为什么不是一套代码编译两次）

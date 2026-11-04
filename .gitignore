@@ -23,3 +23,9 @@ Thumbs.db
 # 本地 Go 依赖（Android libcore 的 go.mod replace 路径）
 /libneko/
 /sing-box/
+
+# Qt 版 Windows 客户端：三方内核源码与构建产物都不入库
+/RekoboxForWindowsQt/_deps/
+/RekoboxForWindowsQt/libs/deps/
+/RekoboxForWindowsQt/deployment/
+/RekoboxForWindowsQt/res/_geodata/

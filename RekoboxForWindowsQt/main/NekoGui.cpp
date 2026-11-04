@@ -434,6 +434,11 @@ namespace NekoGui {
 
     QString FindNekoBoxCoreRealPath() {
         auto fn = QApplication::applicationDirPath() + "/rekobox_core";
+#ifdef Q_OS_WIN
+        // QProcess 在 Windows 上用 lpApplicationName 直接启动，不会自动补 .exe，
+        // 必须给全名，否则报 "系统找不到指定的文件"
+        if (!fn.endsWith(".exe", Qt::CaseInsensitive)) fn += ".exe";
+#endif
         auto fi = QFileInfo(fn);
         if (fi.isSymLink()) return fi.symLinkTarget();
         return fn;

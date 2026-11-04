@@ -134,3 +134,19 @@ fork `MatsuriDayo/sing-box` 的分支情况：
 - **CI 未同步**：`.github/workflows/build-nekoray-cmake.yml` 仍是 MSVC + 自定义 Qt 的旧流程，
   与本地 MinGW 流程不一致；发版前建议改成 MinGW 矩阵。
 - 仅构建 `amd64`，未做 `arm64`。
+
+## 6. 排错
+
+| 现象 | 原因 | 处理 |
+|---|---|---|
+| `start core error occurred: 进程启动失败：系统找不到指定的文件` | 内核路径没带 `.exe`（QProcess 在 Windows 上用 `lpApplicationName` 启动，不会自动补后缀） | 已修：`FindNekoBoxCoreRealPath()` 在 `Q_OS_WIN` 下补 `.exe`，`mainwindow.cpp` 改用它而不再硬编码 |
+| `This application failed to start because no Qt platform plugin could be initialized` | 直接双击了 **zip 里的** exe，或只解压了 `rekobox.exe` —— `platforms/qwindows.dll` 与 Qt DLL 不在旁边 | 必须**完整解压**整个 `windows64` 目录后，运行目录内的 `rekobox.exe` |
+| 启动后立刻退出、无窗口 | 上一次实例残留（单实例锁 `%LOCALAPPDATA%\Rekobox\.instance.lock`） | 任务管理器结束 `rekobox.exe` 后重试 |
+
+自查（部署目录应至少包含）：
+
+```
+rekobox.exe  rekobox_core.exe  Qt6Core.dll  Qt6Gui.dll  Qt6Widgets.dll
+libgcc_s_seh-1.dll  libstdc++-6.dll  libwinpthread-1.dll
+platforms/qwindows.dll  styles/  tls/  imageformats/  wintun.dll
+```

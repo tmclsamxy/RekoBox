@@ -41,7 +41,7 @@ CORE_OUT="$PWD/deployment/core/rekobox_core.exe"
 ( cd go/cmd/rekobox_core && go build \
     -o "$CORE_OUT" \
     -trimpath -ldflags "-w -s -X github.com/matsuridayo/libneko/neko_common.Version_neko=$(cat ../../../nekoray_version.txt)" \
-    -tags "with_clash_api,with_gvisor,with_quic,with_wireguard,with_utls,with_ech" )
+    -tags "with_clash_api,with_gvisor,with_quic,with_wireguard,with_utls" )
 
 #### 3. CMake 配置 ####
 echo "==> [3/5] CMake 配置"

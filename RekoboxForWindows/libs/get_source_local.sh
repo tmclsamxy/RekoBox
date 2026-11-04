@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # 拉取内核三方源码到本仓库 _deps/（替代上游 libs/get_source.sh 的仓库外 ../sing-box 布局）
 # 版本锁定在 libs/get_source_env.sh
+#
+# sing-quic 不再固定为仓库内副本：sing-box 1.12 需要配套的 quic-go 接口，
+# 交给 go.mod 解析合适版本。
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -27,6 +30,5 @@ fetch() { # name repo sha
     )
 }
 
-fetch sing-box  MatsuriDayo/sing-box  "$COMMIT_SING_BOX"
-fetch sing-quic MatsuriDayo/sing-quic "$COMMIT_SING_QUIC"
-fetch libneko   MatsuriDayo/libneko   "$COMMIT_LIBNEKO"
+fetch sing-box MatsuriDayo/sing-box "$COMMIT_SING_BOX"
+fetch libneko  MatsuriDayo/libneko  "$COMMIT_LIBNEKO"

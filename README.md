@@ -17,7 +17,7 @@ Rekobox/
 | 平台 | 目录 | 当前状态 |
 |---|---|---|
 | **Android** | `RekoboxForAndroid/` | v1.0.1 已发布；`io.rekobox`，4 个 split ABI；改名基于 NekoBox |
-| **Windows** | `RekoboxForWindows/` | nekoray 4.0.1 移植：Qt6.7 + MinGW 构建通过，sing-box 1.9.7-neko 内核，已实机运行 |
+| **Windows** | `RekoboxForWindows/` | nekoray 4.0.1 移植：Qt6.7 + MinGW 构建通过，sing-box 1.12.19-neko 内核，已实机运行 |
 | **macOS** | `RekoboxForMac/` | 规划中，界面层参考 Windows 的 Qt 实现 |
 
 ## 发布

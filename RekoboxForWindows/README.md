@@ -13,7 +13,7 @@
 | 项 | 值 |
 |---|---|
 | 界面 | Qt 6.7.2 Widgets（MinGW 13.1 构建） |
-| 内核 | `rekobox_core.exe` = sing-box `1.9.7-neko-1` + libneko |
+| 内核 | `rekobox_core.exe` = sing-box **1.12.19-neko-1** + libneko |
 | 编译器 | MinGW-w64 GCC 13.1（原工程 CI 用 MSVC 14.2） |
 | 构建 | CMake 3.31 + Ninja |
 | 产物 | `deployment/windows64/`（95 MB），打包 `dist/Rekobox-1.0.0-windows-x64-qt.zip`（34 MB） |
@@ -102,30 +102,36 @@ bash libs/build_all_mingw.sh        # 首次约 15 分钟
 
 ---
 
-## 4. 为什么核心仍停在 sing-box 1.9.7-neko
+## 4. 内核升级（1.9.7-neko → 1.12.19-neko-1）
 
-fork `MatsuriDayo/sing-box` 的分支情况：
+上游 1.11+ 删掉了 nekoray 依赖的 `cmd/sing-box` 可导入入口（改回 `package main`），
+所以不能只改 commit。做法是在 sing-box 源码树里新加一个公开包 `neko/`，用 sing-box 的公开 API
+重新实现原来那三件事：
 
-| 分支 | 版本 | 是否含 nekoray 所需的 `neko_run.go` 补丁 |
-|---|---|---|
-| `1.9.7`（当前使用） | 1.9.7-neko-1 | ✅ `cmd/sing-box` 是 `package boxmain`，导出 `Create()` / `SetDisableColor()` |
-| `1.11.x` / `1.12.x` / `1.14.x` | 1.11–1.14 | ❌ 恢复成 `package main`，补丁被移除 |
+| 原实现（1.9.7） | 现在（1.12） |
+|---|---|
+| `boxmain.Create()`（`cmd/sing-box` 内的补丁） | `neko.Create()`：`include.Context()` + `json.UnmarshalExtendedContext[option.Options]` + `box.New` |
+| `boxmain.SetDisableColor()` | `neko.SetDisableColor()`，写进 `options.Log.DisableColor` |
+| `instance.SetLogWritter(w)` | `box.Options.PlatformLogWriter`（实现 `log.PlatformWriter`），`neko.Writer` 是适配器 |
+| `Router().SetV2RayServer(boxapi.NewSbV2rayServer(...))` | 写进 `options.Experimental.V2RayAPI.Stats`，查询走 `v2rayapi.StatsService.GetStats()`（`neko.QueryStats`） |
+| `boxmain.Main()`（sing-box CLI） | `neko.CLI()`：只实现 `run -c` / `check -c` / `version`（GUI 的 TUN 模式只用到这几个） |
+| `boxapi.DialContext(ctx, box, network, addr)` | 多一个 `tracker` 参数，传 `nil` 即可 |
+| `boxapi.CreateProxyHttpClient(box)` | 同上，多一个 `tracker` 参数 |
+| `boxapi.DialUDP` | 已移除；libneko 里本来就只是声明未使用，直接删掉该 hook |
 
-即**上游在新分支里删掉了 NekoBox 专用的可导入入口**，不能简单改 commit。
+依赖侧还有两处改动：
 
-要升到 1.12/1.14，需要三件事（本轮未做，避免破坏可构建状态）：
+- 去掉 `replace github.com/sagernet/sing-quic => _deps/sing-quic`：旧副本的
+  `quic.ConnectionState` 没有 `ExportKeyingMaterial`，1.12 要配套的 quic-go
+- 编译标签去掉 `with_ech`：1.12 起 ECH 并入 stdlib，该标签会触发一个故意报错的占位文件
 
-1. 在新分支恢复可导入入口（`package boxmain`，或在 `cmd/sing-box` 下加 `internal/neko` 包），
-   重写 `Create(config []byte)`：`option.Options.UnmarshalJSON` → `UnmarshalJSONContext`、
-   `box.New` 需显式传 `Context` 与 inbound/outbound 注册表、`Start()` 签名变化。
-2. 适配 `grpc_box.go`：`Router().SetV2RayServer` 在 1.11+ 已移除，统计改走 `experimental.v2ray_api`；
-   `instance.SetLogWritter` 换成新日志接口。
-3. `boxapi.DialUDP` 在新分支已不存在，`neko_common.DialUDP` 需改用 `sing-tun` 接口。
+验证：
 
-推进方式：把 `_deps/sing-box` 换成目标分支 → `go build` 数错误 → 逐个收敛。
-建议 1.11 → 1.12 → 1.14 三跳，每跳跑一次实机连通性测试。
-
----
+```bash
+rekobox_core.exe version          # sing-box version 1.12.19-neko-1
+rekobox_core.exe check -c cfg.json # 旧版 DNS 写法（servers[].address + detour）仍可被自动迁移
+rekobox_core.exe --disable-color run -c cfg.json   # mixed 入站正常 LISTENING，日志无重复行
+```
 
 ## 5. 已知限制
 

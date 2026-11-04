@@ -4,7 +4,6 @@
     <string name="version_x">버전(%s)</string>
     <string name="app_version">버전</string>
     <string name="oss_licenses">오픈 소스 라이선스</string>
-    <string name="telegram">텔레그램 업데이트 채널</string>
     <string name="github">소스 코드</string>
     <string name="project">프로젝트</string>
     <string name="app_desc">코틀린에 기록 된 안드로이드에 대한 보편적 인 프록시 도구 체인.</string>
@@ -261,8 +260,6 @@
     <string name="no_proxies_found_in_file">파일에서 프록시를 찾을 수 없습니다</string>
     <string name="no_proxies_found_in_clipboard">클립보드에서 프록시를 찾을 수 없습니다</string>
     <string name="deduplication">중복 제거</string>
-    <string name="donate">기부</string>
-    <string name="donate_info">저는 돈을 사랑합니다</string>
     <string name="ignore_battery_optimizations">배터리 최적화 무시</string>
     <string name="ignore_battery_optimizations_sum">일부 제한 해제</string>
     <string name="plugin">플러그인</string>

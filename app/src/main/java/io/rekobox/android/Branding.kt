@@ -18,8 +18,6 @@ object Branding {
     const val API_RELEASES_PREVIEW =
         "https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/releases/tags/preview"
 
-    const val TELEGRAM_URL = "https://t.me/rekobox"
-
     /** 崩溃报告 / User-Agent 里使用的对外名称 */
     const val APP_NAME = "RekoBox"
     const val APP_NAME_LONG = "RekoBox for Android"

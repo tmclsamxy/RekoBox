@@ -247,7 +247,9 @@ Windows 本机构建的完整踩坑记录见 `../docs/03-release.md`；一键脚
 </code></pre>
 </details>
 
-带 `-plugin` 后缀的协议需要额外安装对应的上游插件 APK（Android 原生插件机制，本仓库保持协议兼容）。
+请到[这里](https://matsuridayo.github.io/nb4a-plugin/)下载插件以获得完整的代理支持.
+
+Please visit [here](https://matsuridayo.github.io/nb4a-plugin/) to download plugins for full proxy supports.
 
 ## 支持的订阅格式 / Supported Subscription Format
 

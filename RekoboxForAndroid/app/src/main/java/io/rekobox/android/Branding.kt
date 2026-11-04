@@ -9,7 +9,7 @@ package io.rekobox.android
 object Branding {
 
     const val REPO_OWNER = "tmclsamxy"
-    const val REPO_NAME = "RekoBoxForAndroid"
+    const val REPO_NAME = "RekoBox"
 
     const val REPO_URL = "https://github.com/$REPO_OWNER/$REPO_NAME"
     const val RELEASES_URL = "$REPO_URL/releases"

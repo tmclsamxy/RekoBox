@@ -119,10 +119,10 @@ SHA-256  : cae8a18c2bc7cf86dc32863900a0e28ba3b271bb7e9fc58376fd2bc17af96b8e
 ```bash
 # 建库（一次性）
 curl -X POST -H "Authorization: Bearer $TOKEN" https://api.github.com/user/repos \
-  -d '{"name":"RekoBoxForAndroid","private":false}'
+  -d '{"name":"RekoBox","private":false}'
 
 # 推送（浅克隆下来的仓库必须先 --unshallow，否则远端 unpack 失败）
-git remote add rekobox https://github.com/tmclsamxy/RekoBoxForAndroid.git
+git remote add rekobox https://github.com/tmclsamxy/RekoBox.git
 git fetch --unshallow origin
 git push rekobox main
 git push rekobox v1.0.0

@@ -84,7 +84,7 @@ CI 产物名**。有两类字符串**故意保留**（插件协议、深链 sche
 ```kotlin
 object Branding {
     const val REPO_OWNER = "tmclsamxy"
-    const val REPO_NAME  = "RekoBoxForAndroid"
+    const val REPO_NAME  = "RekoBox"
     const val REPO_URL   = "https://github.com/$REPO_OWNER/$REPO_NAME"
     const val RELEASES_URL = "$REPO_URL/releases"
     const val API_RELEASES_LATEST  = "https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/releases/latest"

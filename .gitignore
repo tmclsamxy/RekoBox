@@ -1,21 +1,25 @@
-*.iml
-.gradle
-.idea
-.vscode
-.DS_Store
-build/
-/captures
-.externalNativeBuild
-.cxx
-local.properties
-/app/libs/
-/app/src/main/assets/sing-box
-/service_account_credentials.json
-jniLibs/
-/library/libcore_build/
-.idea/deploymentTargetDropDown.xml
-/nkmr
+# 工作区内部目录（不属于仓库内容）
+.tmp/
+.workbuddy/
+.gocache/
+.gopath/
 
-# submodules
-/external
-.hev-build/
+# 构建产物
+dist/
+**/build/
+**/.gradle/
+**/.kotlin/
+**/local.properties
+
+# Windows 端随包内核（由 scripts/fetch-core.ps1 下载）
+RekoboxForWindows/runtime/windows/*.exe
+RekoboxForWindows/runtime/windows/*.dll
+
+# 系统文件
+.DS_Store
+Thumbs.db
+*.log
+
+# 本地 Go 依赖（Android libcore 的 go.mod replace 路径）
+/libneko/
+/sing-box/

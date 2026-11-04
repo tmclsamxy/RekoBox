@@ -6,6 +6,9 @@ jobs:
   libcore:
     name: Native Build (LibCore)
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: RekoboxForAndroid
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -20,8 +23,8 @@ jobs:
         uses: actions/cache@v5
         with:
           path: |
-            app/libs/libcore.aar
-          key: ${{ hashFiles('.github/workflows/*', 'golang_status', 'libcore_status') }}
+            RekoboxForAndroid/app/libs/libcore.aar
+          key: ${{ hashFiles('.github/workflows/*', 'RekoboxForAndroid/golang_status', 'RekoboxForAndroid/libcore_status') }}
       - name: Install Golang
         if: steps.cache.outputs.cache-hit != 'true'
         uses: actions/setup-go@v6
@@ -33,6 +36,9 @@ jobs:
   build:
     name: Build OSS APK
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: RekoboxForAndroid
     needs:
       - libcore
     steps:
@@ -48,18 +54,18 @@ jobs:
         uses: actions/cache@v5
         with:
           path: |
-            app/libs/libcore.aar
-          key: ${{ hashFiles('.github/workflows/*', 'golang_status', 'libcore_status') }}
+            RekoboxForAndroid/app/libs/libcore.aar
+          key: ${{ hashFiles('.github/workflows/*', 'RekoboxForAndroid/golang_status', 'RekoboxForAndroid/libcore_status') }}
       - name: HevTun Status
         run: |
-          git submodule status hev-socks5-tunnel > hev_status
+          git submodule status RekoboxForAndroid/hev-socks5-tunnel > hev_status
           cat buildScript/compile-hevtun.sh | sha1sum >> hev_status
       - name: HevTun Cache
         uses: actions/cache@v5
         with:
           path: |
-            app/src/main/jniLibs
-          key: hevtun-${{ hashFiles('.github/workflows/*', 'hev_status') }}
+            RekoboxForAndroid/app/src/main/jniLibs
+          key: hevtun-${{ hashFiles('.github/workflows/*', 'RekoboxForAndroid/hev_status') }}
       - name: Gradle cache
         uses: actions/cache@v5
         with:
@@ -76,7 +82,7 @@ jobs:
           ./gradlew app:assemblePreviewRelease
           APK=$(find app/build/outputs/apk -name '*arm64-v8a*.apk')
           APK=$(dirname $APK)
-          echo "APK=$APK" >> $GITHUB_ENV
+          echo "APK=$(realpath $APK)" >> $GITHUB_ENV
       - uses: actions/upload-artifact@v5
         with:
           name: APKs

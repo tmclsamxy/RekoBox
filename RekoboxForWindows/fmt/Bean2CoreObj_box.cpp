@@ -198,8 +198,32 @@ namespace NekoGui_fmt {
             outbound["down_mbps"] = downloadMbps;
 
             if (!hopPort.trimmed().isEmpty()) {
-                outbound["hop_ports"] = hopPort;
-                outbound["hop_interval"] = hopInterval;
+                // 端口跳跃，三处与 sing-box 对齐：
+                // 1) 字段名是 server_ports（badoption.Listable[string]），不是 hop_ports
+                // 2) 每段范围用 "start:end"（hysteria.ParsePorts 只认冒号），
+                //    而分享链接的 mport 习惯写 "20000-30000"，这里归一化
+                // 3) 多段必须是数组；Listable 只接受单个字符串或字符串数组，不会按逗号拆
+                QJsonArray portRanges;
+                for (const auto &part : hopPort.split(",", Qt::SkipEmptyParts)) {
+                    QString range = part.trimmed();
+                    range.replace("-", ":");
+                    // 只收 "start:end" / ":end" / "start:" 三种形式，其余丢弃，
+                    // 否则核心会在 hysteria.ParsePorts 里报 bad port range
+                    auto seg = range.split(":");
+                    if (seg.size() == 2 && !(seg[0].isEmpty() && seg[1].isEmpty())) {
+                        portRanges.append(range);
+                    }
+                }
+                if (portRanges.size() == 1) {
+                    outbound["server_ports"] = portRanges.first().toString();
+                } else if (!portRanges.isEmpty()) {
+                    outbound["server_ports"] = portRanges;
+                }
+                // hop_interval 是 badoption.Duration，JSON 必须是带单位的字符串；
+                // 写成数字会报 cannot unmarshal number into Go value of type string
+                if (hopInterval > 0) {
+                    outbound["hop_interval"] = QString::number(hopInterval) + "s";
+                }
             }
             if (!obfsPassword.isEmpty()) {
                 outbound["obfs"] = QJsonObject{

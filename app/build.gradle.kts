@@ -27,7 +27,7 @@ android {
         viewBinding = true
         aidl = true
     }
-    namespace = "io.nekohasekai.sagernet"
+    namespace = "io.rekobox.android"
     packaging {
         jniLibs {
             useLegacyPackaging = true

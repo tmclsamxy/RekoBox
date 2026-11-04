@@ -1,9 +1,14 @@
-# NekoBox for Android
+# RekoBox for Android
+
+> **RekoBox** 是 [NekoBox for Android](https://github.com/MatsuriDayo/NekoBoxForAndroid) 的下游再发行版（fork），
+> 遵循上游 **GPL-3.0** 许可证发布。上游版权归 MatsuriDayo 及 [AUTHORS](AUTHORS) 中的各位贡献者所有；
+> 本仓库仅重命名应用标识与界面文案，核心引擎（sing-box / libcore）与上游保持一致。
+> 按 GPL-3.0 要求，本项目的完整源代码随二进制一并提供。
 
 [![API](https://img.shields.io/badge/API-21%2B-brightgreen.svg?style=flat)](https://android-arsenal.com/api?level=21)
-[![Releases](https://img.shields.io/github/v/release/MatsuriDayo/NekoBoxForAndroid)](https://github.com/MatsuriDayo/NekoBoxForAndroid/releases)
+[![Releases](https://img.shields.io/github/v/release/tmclsamxy/RekoBoxForAndroid)](https://github.com/tmclsamxy/RekoBoxForAndroid/releases)
 [![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-orange.svg)](https://www.gnu.org/licenses/gpl-3.0)
-[![Contributors](https://img.shields.io/github/contributors/starifly/NekoBoxForAndroid)](https://github.com/starifly/NekoBoxForAndroid/graphs/contributors)
+[![Contributors](https://img.shields.io/github/contributors/tmclsamxy/RekoBoxForAndroid)](https://github.com/tmclsamxy/RekoBoxForAndroid/graphs/contributors)
 
 ## 免责声明
 
@@ -13,9 +18,9 @@
 
 ## 下载 / Downloads
 
-[![GitHub All Releases](https://img.shields.io/github/downloads/Matsuridayo/NekoBoxForAndroid/total?label=downloads-total&logo=github&style=flat-square)](https://github.com/starifly/NekoBoxForAndroid/releases)
+[![GitHub All Releases](https://img.shields.io/github/downloads/tmclsamxy/RekoBoxForAndroid/total?label=downloads-total&logo=github&style=flat-square)](https://github.com/tmclsamxy/RekoBoxForAndroid/releases)
 
-[GitHub Releases 下载](https://github.com/starifly/NekoBoxForAndroid/releases)
+[GitHub Releases 下载](https://github.com/tmclsamxy/RekoBoxForAndroid/releases)
 
 **Google Play 版本自 2024 年 5 月起已被第三方控制，为非开源版本，请不要下载。**
 
@@ -24,7 +29,7 @@ source version. Please do not download it.**
 
 ## 更新日志 & Telegram 发布频道 / Changelog & Telegram Channel
 
-https://t.me/Matsuridayo
+https://t.me/rekobox
 
 ## 项目主页 & 文档 / Homepage & Documents
 
@@ -259,6 +264,10 @@ USDT TRC20
 
 ## Credits
 
+Upstream:
+
+- [MatsuriDayo/NekoBoxForAndroid](https://github.com/MatsuriDayo/NekoBoxForAndroid) — 本项目的直接上游
+
 Core:
 
 - [SagerNet/sing-box](https://github.com/SagerNet/sing-box)
@@ -274,4 +283,4 @@ Web Dashboard:
 
 ## Contributors
 
-![Contributors](https://contrib.rocks/image?repo=starifly/NekoBoxForAndroid)
+![Contributors](https://contrib.rocks/image?repo=tmclsamxy/RekoBoxForAndroid)

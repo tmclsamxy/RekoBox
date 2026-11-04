@@ -9,7 +9,7 @@
 # The JNI entry points (TProxyStartService/TProxyStopService/TProxyIsRunning/
 # TProxyGetStats) are bound at library load time via RegisterNatives to the
 # class named by -DPKGNAME/-DCLSNAME below; keep them in sync with
-# moe.matsuri.nb4a.hevtun.HevTunNative.
+# io.rekobox.android.nb4a.hevtun.HevTunNative.
 #
 # Usage:
 #   ./buildScript/compile-hevtun.sh
@@ -49,18 +49,48 @@ fi
 mkdir -p "$BUILD_DIR"
 pushd "$BUILD_DIR" > /dev/null
 
-if [ ! -e jni/hev-socks5-tunnel ]; then
+if [ ! -f jni/hev-socks5-tunnel/Android.mk ]; then
     mkdir -p jni
-    ln -sfn "$HEV_SRC" jni/hev-socks5-tunnel
+    rm -rf jni/hev-socks5-tunnel
+    # Git Bash 默认不创建真符号链接，ln -s 会退化成空目录，这里直接复制
+    if ! ln -sfn "$HEV_SRC" jni/hev-socks5-tunnel 2>/dev/null || [ ! -f jni/hev-socks5-tunnel/Android.mk ]; then
+        rm -rf jni/hev-socks5-tunnel
+        cp -r "$HEV_SRC" jni/hev-socks5-tunnel
+    fi
     echo 'include $(call all-subdir-makefiles)' > jni/Android.mk
 fi
 
-"$ANDROID_NDK_HOME/ndk-build" \
+# Windows 上 NDK 只提供 ndk-build.cmd（无同名的可执行 shell 脚本）
+NDK_BUILD="$ANDROID_NDK_HOME/ndk-build"
+if [ ! -x "$NDK_BUILD" ]; then
+    if [ -f "$ANDROID_NDK_HOME/ndk-build.cmd" ]; then
+        NDK_BUILD="$ANDROID_NDK_HOME/ndk-build.cmd"
+    else
+        echo "Error: ndk-build not found under $ANDROID_NDK_HOME" >&2
+        exit 1
+    fi
+fi
+
+# Git 在 core.symlinks=false 的 Windows 上会把符号链接签出成纯文本（内容就是目标路径），
+# hev-task-system/include 下全是这种“伪链接”，clang 会当成代码解析而报错。
+# 这里把它们就地还原成真实文件。
+HEV_TREE="jni/hev-socks5-tunnel"
+while IFS= read -r f; do
+    if grep -qE '^(\.\./|\./)[^[:space:]]+\.h$' "$f" 2>/dev/null; then
+        rel="$(tr -d '\r\n' < "$f")"
+        tgt="$(dirname "$f")/$rel"
+        if [ -f "$tgt" ]; then
+            cp -f "$tgt" "$f"
+        fi
+    fi
+done < <(find "$HEV_TREE" -name '*.h' -type f)
+
+"$NDK_BUILD" \
     NDK_PROJECT_PATH=. \
     APP_BUILD_SCRIPT=jni/Android.mk \
     "APP_ABI=$ABIS" \
     APP_PLATFORM=android-21 \
-    "APP_CFLAGS=-O3 -DPKGNAME=moe/matsuri/nb4a/hevtun -DCLSNAME=HevTunNative" \
+    "APP_CFLAGS=-O3 -DPKGNAME=io/rekobox/android/nb4a/hevtun -DCLSNAME=HevTunNative" \
     "APP_LDFLAGS=-Wl,--build-id=none -Wl,--hash-style=gnu" \
     NDK_LIBS_OUT="$BUILD_DIR/libs" \
     NDK_OUT="$BUILD_DIR/obj"

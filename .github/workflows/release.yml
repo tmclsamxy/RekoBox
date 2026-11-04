@@ -6,8 +6,9 @@ on:
         description: "Release Tag"
         required: true
       publish:
-        description: "Publish: If want ignore"
+        description: "填 true 才真正创建 GitHub Release"
         required: false
+        default: "false"
 jobs:
   libcore:
     name: Native Build (LibCore)
@@ -89,7 +90,7 @@ jobs:
           path: ${{ env.APK }}
   publish:
     name: Publish Release
-    if: github.event.inputs.publish != 'y'
+    if: github.event.inputs.publish == 'true'
     runs-on: ubuntu-latest
     needs: build
     steps:

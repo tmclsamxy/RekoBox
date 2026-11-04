@@ -41,7 +41,7 @@ fun Project.requireLocalProperties(): Properties {
 
 fun Project.setupCommon() {
     android.apply {
-        buildToolsVersion = "35.0.1"
+        buildToolsVersion = "35.0.0"
         compileSdk = 35
         defaultConfig {
             minSdk = 21
@@ -88,6 +88,12 @@ fun Project.setupCommon() {
             buildTypes {
                 getByName("release") {
                     isShrinkResources = true
+                    // Windows 本机构建：AGP 新版资源压缩器在 ABI 分包下会并发写同一个
+                    // mapping/<variant>/resources.txt，第二个 worker 报 "拒绝访问"。
+                    // 设 REKOBOX_NO_RES_SHRINK=1 可只关闭资源压缩，保留 R8 混淆/裁剪。
+                    if (System.getenv("REKOBOX_NO_RES_SHRINK") == "1") {
+                        isShrinkResources = false
+                    }
                     if (System.getenv("nkmr_minify") == "0") {
                         isShrinkResources = false
                         isMinifyEnabled = false
@@ -197,10 +203,10 @@ fun Project.setupApp() {
                 outputFileName = if (isPreview) {
                     outputFileName.replace(
                         project.name,
-                        "NekoBoxF-" + requireMetadata().getProperty("PRE_VERSION_NAME")
+                        "RekoBox-" + requireMetadata().getProperty("PRE_VERSION_NAME")
                     ).replace("-preview", "")
                 } else {
-                    outputFileName.replace(project.name, "NekoBoxF-$versionName")
+                    outputFileName.replace(project.name, "RekoBox-$versionName")
                         .replace("-release", "")
                         .replace("-oss", "")
                 }

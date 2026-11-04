@@ -7,8 +7,8 @@
         android:shortcutShortLabel="@string/quick_toggle">
         <intent
             android:action="android.intent.action.MAIN"
-            android:targetClass="io.nekohasekai.sagernet.QuickToggleShortcut"
-            android:targetPackage="com.nb4a" />
+            android:targetClass="io.rekobox.android.QuickToggleShortcut"
+            android:targetPackage="io.rekobox" />
     </shortcut>
     <shortcut
         android:icon="@drawable/ic_qu_shadowsocks_launcher"
@@ -17,8 +17,8 @@
         android:shortcutShortLabel="@string/quick_enable">
         <intent
             android:action="android.intent.action.MAIN"
-            android:targetClass="io.nekohasekai.sagernet.ui.QuickEnableShortcut"
-            android:targetPackage="com.nb4a" />
+            android:targetClass="io.rekobox.android.ui.QuickEnableShortcut"
+            android:targetPackage="io.rekobox" />
     </shortcut>
     <shortcut
         android:icon="@drawable/ic_qu_shadowsocks_launcher"
@@ -27,8 +27,8 @@
         android:shortcutShortLabel="@string/quick_disable">
         <intent
             android:action="android.intent.action.MAIN"
-            android:targetClass="io.nekohasekai.sagernet.ui.QuickDisableShortcut"
-            android:targetPackage="com.nb4a" />
+            android:targetClass="io.rekobox.android.ui.QuickDisableShortcut"
+            android:targetPackage="io.rekobox" />
     </shortcut>
     <shortcut
         android:icon="@drawable/ic_qu_camera_launcher"
@@ -37,7 +37,7 @@
         android:shortcutShortLabel="@string/add_profile_methods_scan_qr_code">
         <intent
             android:action="android.intent.action.MAIN"
-            android:targetClass="io.nekohasekai.sagernet.ui.ScannerActivity"
-            android:targetPackage="com.nb4a" />
+            android:targetClass="io.rekobox.android.ui.ScannerActivity"
+            android:targetPackage="io.rekobox" />
     </shortcut>
 </shortcuts>

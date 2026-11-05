@@ -32,6 +32,13 @@ namespace NekoGui_update {
         constexpr auto kApiReleases = "https://api.github.com/repos/tmclsamxy/RekoBox/releases?per_page=30";
         constexpr auto kAssetKeyword = "windows-x64-qt.zip";
 
+        // 允许用环境变量覆盖接口地址：便于本地起一个假的 release 列表做端到端测试，
+        // 默认仍走 GitHub。
+        QString apiUrl() {
+            const auto override = qEnvironmentVariable("REKOBOX_UPDATE_API");
+            return override.isEmpty() ? QString(kApiReleases) : override;
+        }
+
         struct ReleaseInfo {
             QString version;
             QString tag;
@@ -73,6 +80,14 @@ namespace NekoGui_update {
             Updater(QWidget *parent, bool manual)
                 : QObject(parent), parent(parent), manual(manual) {}
 
+            ~Updater() override {
+                if (downloadFile != nullptr) {
+                    downloadFile->close();
+                    delete downloadFile;
+                    downloadFile = nullptr;
+                }
+            }
+
             void start() {
                 tryFetch(true);
             }
@@ -86,6 +101,7 @@ namespace NekoGui_update {
             ReleaseInfo update;
             QString tempDir;
             QProgressDialog *progress = nullptr;
+            QFile *downloadFile = nullptr;
 
             void applyProxy(bool viaProxy) {
                 if (!viaProxy) {
@@ -107,7 +123,7 @@ namespace NekoGui_update {
 
             void tryFetch(bool viaProxy) {
                 applyProxy(viaProxy);
-                QNetworkRequest request{QUrl(kApiReleases)};
+                QNetworkRequest request{QUrl(apiUrl())};
                 request.setHeader(QNetworkRequest::UserAgentHeader,
                                   QString("RekoBox/%1").arg(QString(NKR_VERSION)));
                 request.setRawHeader("Accept", "application/vnd.github+json");
@@ -235,7 +251,27 @@ namespace NekoGui_update {
                 QNetworkRequest request{QUrl(update.assetUrl)};
                 request.setHeader(QNetworkRequest::UserAgentHeader,
                                   QString("RekoBox/%1").arg(QString(NKR_VERSION)));
+
+                downloadFile = new QFile(QDir(tempDir).filePath("update.zip"));
+                if (!downloadFile->open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+                    delete downloadFile;
+                    downloadFile = nullptr;
+                    if (progress != nullptr) {
+                        progress->close();
+                        progress->deleteLater();
+                        progress = nullptr;
+                    }
+                    QMessageBox::warning(parent, QObject::tr("Update"),
+                                         QObject::tr("Cannot create the update file."));
+                    deleteLater();
+                    return;
+                }
+
                 reply = nam.get(request);
+                // 流式落盘：32 MB 一次性 readAll 会白占内存，也不利于进度反馈
+                connect(reply, &QNetworkReply::readyRead, this, [this] {
+                    if (downloadFile != nullptr) downloadFile->write(reply->readAll());
+                });
                 connect(reply, &QNetworkReply::downloadProgress, this, [this](qint64 received, qint64 total) {
                     if (progress == nullptr || total <= 0) return;
                     progress->setMaximum(100);
@@ -248,6 +284,17 @@ namespace NekoGui_update {
                 connect(reply, &QNetworkReply::finished, this, [this] {
                     const auto error = reply->error();
                     const auto errorString = reply->errorString();
+
+                    qint64 written = 0;
+                    if (downloadFile != nullptr) {
+                        downloadFile->flush();
+                        written = downloadFile->size();
+                        downloadFile->close();
+                        delete downloadFile;
+                        downloadFile = nullptr;
+                    }
+                    const auto expected = update.assetSize;
+
                     reply->deleteLater();
                     reply = nullptr;
                     if (progress != nullptr) {
@@ -258,6 +305,14 @@ namespace NekoGui_update {
                     if (error != QNetworkReply::NoError) {
                         QMessageBox::warning(parent, QObject::tr("Update"),
                                              QObject::tr("Download failed: %1").arg(errorString));
+                        deleteLater();
+                        return;
+                    }
+                    if (expected > 0 && written != expected) {
+                        QMessageBox::warning(
+                            parent, QObject::tr("Update"),
+                            QObject::tr("Download incomplete: %1 of %2 bytes.")
+                                .arg(QString::number(written), QString::number(expected)));
                         deleteLater();
                         return;
                     }
@@ -345,18 +400,31 @@ Expand-Archive -LiteralPath $Zip -DestinationPath $Dest -Force
 $ErrorActionPreference = 'Stop'
 $log = Join-Path $env:TEMP 'rekobox-update.log'
 try {
+    # 主进程刚发起退出，先给它时间真正结束
+    Start-Sleep -Seconds 2
     $deadline = (Get-Date).AddSeconds(120)
     while ((Get-Process -Name 'rekobox' -ErrorAction SilentlyContinue) -and ((Get-Date) -lt $deadline)) {
         Start-Sleep -Milliseconds 500
     }
-    Start-Sleep -Milliseconds 800
-    Copy-Item -Path (Join-Path $Src '*') -Destination $Dst -Recurse -Force
+    # 进程消失后句柄不一定立刻释放，复制失败就重试
+    Start-Sleep -Seconds 2
+    $copied = $false
+    for ($i = 0; $i -lt 10; $i++) {
+        try {
+            Copy-Item -Path (Join-Path $Src '*') -Destination $Dst -Recurse -Force -ErrorAction Stop
+            $copied = $true
+            break
+        } catch {
+            Start-Sleep -Seconds 2
+        }
+    }
+    if (-not $copied) { throw 'copy failed: target still locked' }
     "updated at $(Get-Date -Format o)" | Out-File -FilePath $log -Encoding utf8
 } catch {
     "failed: $_" | Out-File -FilePath $log -Encoding utf8
 } finally {
-    Start-Sleep -Milliseconds 300
-    Start-Process -FilePath $Exe
+    Start-Sleep -Milliseconds 500
+    try { Start-Process -FilePath $Exe } catch { }
     Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue
 }
 )PS1");

@@ -25,6 +25,7 @@ import io.rekobox.android.BuildConfig
 import io.rekobox.android.GroupType
 import io.rekobox.android.Key
 import io.rekobox.android.R
+import io.rekobox.android.update.UpdateLauncher
 import io.rekobox.android.SagerNet
 import io.rekobox.android.aidl.ISagerNetService
 import io.rekobox.android.aidl.SpeedDisplayData
@@ -105,6 +106,9 @@ class MainActivity : ThemedActivity(),
         binding.stats.setOnClickListener { if (DataStore.serviceState.connected) binding.stats.testConnection() }
 
         setContentView(binding.root)
+
+        // 启动时静默检查更新（24 小时节流，失败不打扰）
+        UpdateLauncher.checkOnStart(this)
         currentMainFragment =
             supportFragmentManager.findFragmentById(R.id.fragment_holder) as? ToolbarFragment
                 ?: currentMainFragment

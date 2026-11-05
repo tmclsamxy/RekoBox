@@ -665,6 +665,11 @@
     <string name="check_update_release">Check for release version updates</string>
     <string name="update_dialog_title">New version available</string>
     <string name="update_dialog_message">Current version: %1$s\nAvailable version: %2$s\nDo you want to download it?</string>
+    <string name="update_changelog_title">What\'s new</string>
+    <string name="update_downloading">Downloading update…</string>
+    <string name="update_download_failed">Download failed: %1$s</string>
+    <string name="update_install_permission_message">Installing the update requires the “Install unknown apps” permission for RekoBox. Open settings and allow it, then check for updates again.</string>
+    <string name="update_install_permission_go">Open settings</string>
     <string name="check_update_no">Check successful, but no updates.</string>
     <string name="reset_settings">Restore default settings</string>
     <string name="reset_settings_message">Restore default settings, but data such as nodes and groups will be retained. To completely clear data, clear application data directly in the system settings.</string>

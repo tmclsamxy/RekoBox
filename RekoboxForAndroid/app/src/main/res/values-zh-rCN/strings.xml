@@ -580,6 +580,11 @@
     <string name="check_update_release">检查正式版更新</string>
     <string name="update_dialog_title">发现新版本</string>
     <string name="update_dialog_message">当前版本：%1$s\n可升级版本：%2$s\n是否前往下载？</string>
+    <string name="update_changelog_title">更新内容</string>
+    <string name="update_downloading">正在下载更新…</string>
+    <string name="update_download_failed">下载失败：%1$s</string>
+    <string name="update_install_permission_message">安装更新需要为 RekoBox 开启「安装未知应用」权限。请在设置中允许后重新检查更新。</string>
+    <string name="update_install_permission_go">去设置</string>
     <string name="check_update_no">检查成功，但没有更新。</string>
     <string name="reset_settings">恢复默认设置</string>
     <string name="reset_settings_message">恢复默认设置，但节点、分组等数据将保留。如需完全清除数据，请在系统设置中直接清除应用数据。</string>

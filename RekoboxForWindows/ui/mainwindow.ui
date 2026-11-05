@@ -443,6 +443,7 @@
     <addaction name="menu_spmode"/>
     <addaction name="menu_program_preference"/>
     <addaction name="separator"/>
+    <addaction name="actionCheck_Update"/>
     <addaction name="actionRestart_Proxy"/>
     <addaction name="actionRestart_Program"/>
     <addaction name="menu_exit"/>
@@ -809,6 +810,11 @@
   <action name="menu_vpn_settings">
    <property name="text">
     <string>Tun Settings</string>
+   </property>
+  </action>
+  <action name="actionCheck_Update">
+   <property name="text">
+    <string>Check for updates</string>
    </property>
   </action>
   <action name="actionRestart_Program">

@@ -9,6 +9,7 @@
 #include "sys/AutoRun.hpp"
 
 #include "ui/ThemeManager.hpp"
+#include "ui/update/UpdateHelper.hpp"
 #include "ui/Icon.hpp"
 #include "ui/edit/dialog_edit_profile.h"
 #include "ui/dialog_basic_settings.h"
@@ -245,6 +246,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
     connect(ui->menu_add_from_clipboard2, &QAction::triggered, ui->menu_add_from_clipboard, &QAction::trigger);
     connect(ui->actionRestart_Proxy, &QAction::triggered, this, [=] { if (NekoGui::dataStore->started_id>=0) neko_start(NekoGui::dataStore->started_id); });
     connect(ui->actionRestart_Program, &QAction::triggered, this, [=] { MW_dialog_message("", "RestartProgram"); });
+    connect(ui->actionCheck_Update, &QAction::triggered, this, [=] { NekoGui_update::CheckForUpdates(this, true); });
     connect(ui->actionShow_window, &QAction::triggered, this, [=] { tray->activated(QSystemTrayIcon::ActivationReason::Trigger); });
     //
     connect(ui->menu_program, &QMenu::aboutToShow, this, [=]() {
@@ -436,6 +438,9 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
     TM_auto_update_subsctiption_Reset_Minute(NekoGui::dataStore->sub_auto_update);
 
     if (!NekoGui::dataStore->flag_tray) show();
+
+    // 启动后静默检查更新：只在新版本存在时弹窗，失败不打扰
+    QTimer::singleShot(8000, this, [this] { NekoGui_update::CheckForUpdates(this, false); });
 }
 
 void MainWindow::closeEvent(QCloseEvent *event) {

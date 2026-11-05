@@ -165,6 +165,8 @@ set(PROJECT_SOURCES
 
         ui/mainwindow_grpc.cpp
         ui/mainwindow.cpp
+        ui/update/UpdateHelper.cpp
+        ui/update/UpdateHelper.hpp
         ui/mainwindow.h
         ui/mainwindow.ui
 

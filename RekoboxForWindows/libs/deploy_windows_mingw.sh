@@ -33,11 +33,27 @@ echo ">> [3/5] 分流规则数据"
 GEODIR="$PWD/res/_geodata"
 mkdir -p "$GEODIR"
 fetch() { [ -f "$2" ] || curl -fLso "$2" "$1"; }
-fetch "https://github.com/SagerNet/sing-geoip/releases/latest/download/geoip.db"   "$GEODIR/geoip.db"
-fetch "https://github.com/SagerNet/sing-geosite/releases/latest/download/geosite.db" "$GEODIR/geosite.db"
+# .dat 仅供界面做分类名自动补全（本地读取，不进核心）
 fetch "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat" "$GEODIR/geoip.dat"
 fetch "https://github.com/v2fly/domain-list-community/releases/latest/download/dlc.dat"    "$GEODIR/geosite.dat"
-cp "$GEODIR"/*.db "$GEODIR"/*.dat "$DEST/" 2>/dev/null || true
+
+# sing-box 1.12 起 geoip:/geosite: rule 已移除，改为 rule_set 引用 .srs 数据。
+# 常用集合随包分发（离线可用）；配置里用到但本地没有的集合，会自动回退到远程地址。
+SRSDIR="$GEODIR/srs"
+mkdir -p "$SRSDIR"
+fetch_srs() {
+    [ -f "$SRSDIR/$1.srs" ] && return 0
+    curl -fsL --retry 3 -o "$SRSDIR/$1.srs" \
+        "https://raw.githubusercontent.com/SagerNet/sing-${1%%-*}/rule-set/$1.srs" \
+        || rm -f "$SRSDIR/$1.srs"
+}
+for tag in geosite-cn geosite-geolocation-cn "geosite-geolocation-!cn" geosite-category-ads-all \
+           geosite-google geosite-telegram geosite-youtube geoip-cn geoip-hk geoip-tw geoip-jp geoip-sg geoip-us; do
+    fetch_srs "$tag"
+done
+
+cp "$GEODIR"/*.dat "$DEST/" 2>/dev/null || true
+cp "$SRSDIR"/*.srs "$DEST/" 2>/dev/null || true
 cp "$PWD/res/public/"* "$DEST/"
 
 echo ">> [4/5] TUN 驱动"

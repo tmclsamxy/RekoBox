@@ -477,24 +477,36 @@ namespace NekoGui {
             QJsonObject rule;
             //
             QJsonArray ip_cidr;
-            QJsonArray geoip;
             //
             QJsonArray domain_keyword;
             QJsonArray domain_subdomain;
             QJsonArray domain_regexp;
             QJsonArray domain_full;
-            QJsonArray geosite;
+            //
+            // geoip:/geosite: 在 sing-box 1.8 弃用、1.12 移除，改为引用 rule_set。
+            // tag 命名保持 "geoip-<name>" / "geosite-<name>"，与 sing-* 官方 rule-set 文件名一致。
+            QJsonArray ruleSet;
+            bool ipIsPrivate = false;
+            auto addRuleSet = [&](const QString &tag) {
+                ruleSet += tag;
+                if (!status->usedRuleSets.contains(tag)) status->usedRuleSets += tag;
+            };
             for (auto item: list) {
                 if (isIP) {
                     if (item.startsWith("geoip:")) {
-                        geoip += item.replace("geoip:", "");
+                        // geoip:private 是 v2ray 的内置项（内网段），sing-box 里对应规则字段 ip_is_private
+                        if (item.mid(6) == "private") {
+                            ipIsPrivate = true;
+                        } else {
+                            addRuleSet("geoip-" + item.mid(6));
+                        }
                     } else {
                         ip_cidr += item;
                     }
                 } else {
                     // https://www.v2fly.org/config/dns.html#dnsobject
                     if (item.startsWith("geosite:")) {
-                        geosite += item.replace("geosite:", "");
+                        addRuleSet("geosite-" + item.mid(8));
                     } else if (item.startsWith("full:")) {
                         domain_full += item.replace("full:", "").toLower();
                     } else if (item.startsWith("domain:")) {
@@ -509,19 +521,19 @@ namespace NekoGui {
                 }
             }
             if (isIP) {
-                if (ip_cidr.isEmpty() && geoip.isEmpty()) return rule;
-                rule["ip_cidr"] = ip_cidr;
-                rule["geoip"] = geoip;
+                if (ip_cidr.isEmpty() && ruleSet.isEmpty() && !ipIsPrivate) return rule;
+                if (!ip_cidr.isEmpty()) rule["ip_cidr"] = ip_cidr;
+                if (ipIsPrivate) rule["ip_is_private"] = true;
             } else {
-                if (domain_keyword.isEmpty() && domain_subdomain.isEmpty() && domain_regexp.isEmpty() && domain_full.isEmpty() && geosite.isEmpty()) {
+                if (domain_keyword.isEmpty() && domain_subdomain.isEmpty() && domain_regexp.isEmpty() && domain_full.isEmpty() && ruleSet.isEmpty()) {
                     return rule;
                 }
                 rule["domain"] = domain_full;
                 rule["domain_suffix"] = domain_subdomain; // v2ray Subdomain => sing-box suffix
                 rule["domain_keyword"] = domain_keyword;
                 rule["domain_regex"] = domain_regexp;
-                rule["geosite"] = geosite;
             }
+            if (!ruleSet.isEmpty()) rule["rule_set"] = ruleSet;
             return rule;
         };
 
@@ -693,11 +705,32 @@ namespace NekoGui {
             }
         }
 
-        // geopath
-        auto geoip = FindCoreAsset("geoip.db");
-        auto geosite = FindCoreAsset("geosite.db");
-        if (geoip.isEmpty()) status->result->error = +"geoip.db not found";
-        if (geosite.isEmpty()) status->result->error = +"geosite.db not found";
+        // rule_set
+        // sing-box 1.12 移除了 route.geoip / route.geosite 与规则里的 geoip/geosite 字段，
+        // 统一改为引用 rule_set。优先用随包分发的 .srs（离线可用），缺失时退回官方远程地址。
+        QJsonArray ruleSetArray;
+        for (const auto &tag: status->usedRuleSets) {
+            if (!status->forExport) {
+                auto asset = FindCoreAsset(tag + ".srs");
+                if (!asset.isEmpty()) {
+                    ruleSetArray += QJsonObject{
+                        {"type", "local"},
+                        {"tag", tag},
+                        {"format", "binary"},
+                        {"path", asset},
+                    };
+                    continue;
+                }
+            }
+            auto repo = tag.startsWith("geoip-") ? QStringLiteral("sing-geoip") : QStringLiteral("sing-geosite");
+            ruleSetArray += QJsonObject{
+                {"type", "remote"},
+                {"tag", tag},
+                {"format", "binary"},
+                {"url", QStringLiteral("https://raw.githubusercontent.com/SagerNet/") + repo + "/rule-set/" + tag + ".srs"},
+                {"download_detour", "direct"},
+            };
+        }
 
         // final add routing rule
         auto routingRules = QString2QJsonObject(dataStore->routing->custom)["rules"].toArray();
@@ -707,22 +740,10 @@ namespace NekoGui {
         auto routeObj = QJsonObject{
             {"rules", routingRules},
             {"auto_detect_interface", dataStore->spmode_vpn}, // TODO force enable?
-            {
-                "geoip",
-                QJsonObject{
-                    {"path", geoip},
-                },
-            },
-            {
-                "geosite",
-                QJsonObject{
-                    {"path", geosite},
-                },
-            }};
+        };
+        if (!ruleSetArray.isEmpty()) routeObj["rule_set"] = ruleSetArray;
         if (!status->forTest) routeObj["final"] = dataStore->routing->def_outbound;
         if (status->forExport) {
-            routeObj.remove("geoip");
-            routeObj.remove("geosite");
             routeObj.remove("auto_detect_interface");
         }
         status->result->coreConfig.insert("route", routeObj);

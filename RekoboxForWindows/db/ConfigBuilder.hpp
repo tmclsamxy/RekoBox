@@ -42,6 +42,10 @@ namespace NekoGui {
         QJsonArray routingRules;
         QJsonArray inbounds;
         QJsonArray outbounds;
+
+        // sing-box 1.12 起 geoip:/geosite: 已移除，改为 rule_set 引用；
+        // 这里记录规则里用到的 tag（如 "geosite-cn"），构建 route.rule_set 时统一声明
+        QStringList usedRuleSets;
     };
 
     std::shared_ptr<BuildConfigResult> BuildConfig(const std::shared_ptr<ProxyEntity> &ent, bool forTest, bool forExport);

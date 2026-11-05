@@ -36,12 +36,13 @@ fi
 #### 2. Go 内核 ####
 echo "==> [2/5] 构建 rekobox_core.exe"
 [ -d _deps/sing-box ] || bash libs/get_source_local.sh
+bash libs/apply_neko_patch.sh
 mkdir -p deployment/core
 CORE_OUT="$PWD/deployment/core/rekobox_core.exe"
 ( cd go/cmd/rekobox_core && go build \
     -o "$CORE_OUT" \
     -trimpath -ldflags "-w -s -X github.com/matsuridayo/libneko/neko_common.Version_neko=$(cat ../../../nekoray_version.txt)" \
-    -tags "with_clash_api,with_gvisor,with_quic,with_wireguard,with_utls" )
+    -tags "with_clash_api,with_v2ray_api,with_gvisor,with_quic,with_wireguard,with_utls" )
 
 #### 3. CMake 配置 ####
 echo "==> [3/5] CMake 配置"

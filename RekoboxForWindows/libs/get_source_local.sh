@@ -32,3 +32,6 @@ fetch() { # name repo sha
 
 fetch sing-box MatsuriDayo/sing-box "$COMMIT_SING_BOX"
 fetch libneko  MatsuriDayo/libneko  "$COMMIT_LIBNEKO"
+
+# 新增的公开包（cmd/sing-box 在 1.11+ 不可导入），随仓库走
+bash libs/apply_neko_patch.sh

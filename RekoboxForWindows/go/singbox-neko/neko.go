@@ -137,7 +137,11 @@ func Close(instance *box.Box) {
 	_ = instance.Close()
 }
 
-// QueryStats 读取某个出站的累计流量（字节）
+// QueryStats 读取某个出站自上次查询以来的流量增量（字节）。
+//
+// 必须带 Reset_ = true：sing-box 的计数器是累计值，不 reset 的话调用方拿到的
+// 是「启动至今总量」，GUI 把它当增量累加会让总量飙升，算出来的速率也永远是个
+// 不归零的大数（表现为停止代理后速度还在显示）。
 func QueryStats(instance *box.Box, name string) int64 {
 	ctxMu.RLock()
 	ctx := instCtx[instance]
@@ -153,7 +157,7 @@ func QueryStats(instance *box.Box, name string) int64 {
 	if !ok || stats == nil {
 		return 0
 	}
-	resp, err := stats.GetStats(ctx, &v2rayapi.GetStatsRequest{Name: name})
+	resp, err := stats.GetStats(ctx, &v2rayapi.GetStatsRequest{Name: name, Reset_: true})
 	if err != nil || resp == nil || resp.Stat == nil {
 		return 0
 	}

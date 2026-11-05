@@ -82,6 +82,19 @@ func TestQueryStatsPipeline(t *testing.T) {
 	if up == 0 && down == 0 {
 		t.Fatal("stats 为 0：QueryStats 链路未生效")
 	}
+	if up != int64(len(payload)) || down != int64(len(payload)) {
+		t.Fatalf("首次读取应为实际字节数 %d，得到 up=%d down=%d", len(payload), up, down)
+	}
+
+	// 再读一次：没有新流量，必须归零（Reset_ 生效）。
+	// 不归零的话 GUI 会把累计值当增量，速率永远不回落到 0。
+	time.Sleep(200 * time.Millisecond)
+	up2 := QueryStats(inst, "outbound>>>proxy>>>traffic>>>uplink")
+	down2 := QueryStats(inst, "outbound>>>proxy>>>traffic>>>downlink")
+	t.Logf("second read: uplink=%d downlink=%d", up2, down2)
+	if up2 != 0 || down2 != 0 {
+		t.Fatalf("计数器未重置：第二次读到 up=%d down=%d（应为 0）", up2, down2)
+	}
 }
 
 func itoa(v int) string {

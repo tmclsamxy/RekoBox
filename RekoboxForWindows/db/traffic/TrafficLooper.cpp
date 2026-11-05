@@ -76,6 +76,16 @@ namespace NekoGui_traffic {
         }
     }
 
+    void TrafficLooper::ResetRates() {
+        loop_mutex.lock();
+        if (proxy != nullptr) proxy->ResetRate();
+        bypass->ResetRate();
+        for (const auto &item: items) {
+            item->ResetRate();
+        }
+        loop_mutex.unlock();
+    }
+
     void TrafficLooper::Loop() {
         elapsedTimer.start();
         while (true) {

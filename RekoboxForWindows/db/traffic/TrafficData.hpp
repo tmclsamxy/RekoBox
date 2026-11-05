@@ -28,6 +28,12 @@ namespace NekoGui_traffic {
             uplink_rate = 0;
         }
 
+        // 只清实时速率，保留累计流量（停止代理时用，累计值要留着统计）
+        void ResetRate() {
+            downlink_rate = 0;
+            uplink_rate = 0;
+        }
+
         [[nodiscard]] QString DisplaySpeed() const {
             return UNICODE_LRO + QStringLiteral("%1↑ %2↓").arg(ReadableSize(uplink_rate), ReadableSize(downlink_rate));
         }

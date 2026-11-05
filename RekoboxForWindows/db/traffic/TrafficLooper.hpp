@@ -18,6 +18,9 @@ namespace NekoGui_traffic {
 
         void UpdateAll();
 
+        // 停止代理时把实时速率清零，保留累计流量
+        void ResetRates();
+
         void Loop();
 
     private:

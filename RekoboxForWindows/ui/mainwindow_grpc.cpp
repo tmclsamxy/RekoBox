@@ -435,6 +435,10 @@ void MainWindow::neko_stop(bool crash, bool sem) {
         }
         NekoGui_traffic::trafficLooper->loop_mutex.unlock();
 
+        // 停止后立即把速率显示归零：loop 线程要等下一轮才会清，这中间会残留旧值
+        NekoGui_traffic::trafficLooper->ResetRates();
+        runOnUiThread([=] { refresh_status("STOP"); });
+
         if (!crash) {
             bool rpcOK;
             QString error = defaultClient->Stop(&rpcOK);

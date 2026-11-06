@@ -10,10 +10,8 @@ import (
 	"log"
 	"net"
 	"os"
-	"runtime"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/matsuridayo/libneko/neko_common"
@@ -42,21 +40,16 @@ func RunCore(setupCore func(), server gen.LibcoreServiceServer) {
 
 	neko_common.Debug = *_debug
 
+	// 父进程（GUI）消失后自动退出，避免 GUI 崩溃或被强杀后内核留在后台占着
+	// rekobox_core.exe 与本地端口。Windows 上不能用 Process.Wait（不是本进程
+	// 创建的子进程，会一直阻塞），改为轮询存活状态。
 	go func() {
-		parent, err := os.FindProcess(os.Getppid())
-		if err != nil {
-			log.Fatalln("find parent:", err)
-		}
-		if runtime.GOOS == "windows" {
-			state, err := parent.Wait()
-			log.Fatalln("parent exited:", state, err)
-		} else {
-			for {
-				time.Sleep(time.Second * 10)
-				err = parent.Signal(syscall.Signal(0))
-				if err != nil {
-					log.Fatalln("parent exited:", err)
-				}
+		parentPid := os.Getppid()
+		for {
+			time.Sleep(2 * time.Second)
+			if !processAlive(parentPid) {
+				log.Println("parent exited, shutting down")
+				os.Exit(0)
 			}
 		}
 	}()

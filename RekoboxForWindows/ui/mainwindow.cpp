@@ -45,6 +45,7 @@
 #include <QInputDialog>
 #include <QThread>
 #include <QTimer>
+#include <QToolButton>
 #include <QMessageBox>
 #include <QDir>
 #include <QFileInfo>
@@ -100,6 +101,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
     ui->toolButton_program->setMenu(ui->menu_program);
     ui->toolButton_preferences->setMenu(ui->menu_preferences);
     ui->toolButton_server->setMenu(ui->menu_server);
+    connect(ui->toolButton_update, &QToolButton::clicked, this, [=] { NekoGui_update::CheckForUpdates(this, true); });
     ui->menubar->setVisible(false);
     connect(ui->toolButton_url_test, &QToolButton::clicked, this, [=] { speedtest_current_group(1, true); });
 

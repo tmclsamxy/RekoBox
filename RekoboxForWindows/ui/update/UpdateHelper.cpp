@@ -141,8 +141,8 @@ namespace NekoGui_update {
                             return;
                         }
                         if (manual) {
-                            QMessageBox::warning(parent, QObject::tr("Check update"),
-                                                 QObject::tr("Failed to reach GitHub: %1").arg(err));
+                            QMessageBox::warning(parent, QObject::tr("检查更新"),
+                                                 QObject::tr("无法连接更新服务器：%1").arg(err));
                         }
                         deleteLater();
                         return;
@@ -156,7 +156,7 @@ namespace NekoGui_update {
             void handleReleases(const QByteArray &body) {
                 const auto doc = QJsonDocument::fromJson(body);
                 if (!doc.isArray()) {
-                    fail(QObject::tr("Unexpected response from GitHub."));
+                    fail(QObject::tr("更新服务器返回了无法识别的内容。"));
                     return;
                 }
 
@@ -191,8 +191,8 @@ namespace NekoGui_update {
 
                 if (!found) {
                     if (manual) {
-                        QMessageBox::information(parent, QObject::tr("Check update"),
-                                                 QObject::tr("No update available."));
+                        QMessageBox::information(parent, QObject::tr("检查更新"),
+                                                 QObject::tr("没有可用的更新。"));
                     }
                     deleteLater();
                     return;
@@ -200,8 +200,8 @@ namespace NekoGui_update {
 
                 if (compareVersion(best.version, QString(NKR_VERSION)) <= 0) {
                     if (manual) {
-                        QMessageBox::information(parent, QObject::tr("Check update"),
-                                                 QObject::tr("You are already on the latest version (%1).")
+                        QMessageBox::information(parent, QObject::tr("检查更新"),
+                                                 QObject::tr("当前已是最新版本（%1）。")
                                                      .arg(QString(NKR_VERSION)));
                     }
                     deleteLater();
@@ -213,7 +213,7 @@ namespace NekoGui_update {
             }
 
             void prompt() {
-                QString text = QObject::tr("Current version: %1\nNew version: %2 (%3)\n\nDownload and install now?")
+                QString text = QObject::tr("当前版本：%1\n新版本：%2（%3）\n\n是否立即下载并安装？")
                                    .arg(QString(NKR_VERSION), update.version, readableSize(update.assetSize));
                 if (!update.notes.isEmpty()) {
                     auto notes = update.notes;
@@ -222,7 +222,7 @@ namespace NekoGui_update {
                 }
 
                 QMessageBox box(parent);
-                box.setWindowTitle(QObject::tr("Update available"));
+                box.setWindowTitle(QObject::tr("发现新版本"));
                 box.setText(text);
                 box.setStandardButtons(QMessageBox::Yes | QMessageBox::No);
                 box.setDefaultButton(QMessageBox::Yes);
@@ -239,8 +239,8 @@ namespace NekoGui_update {
                 QDir(tempDir).removeRecursively();
                 QDir().mkpath(tempDir);
 
-                progress = new QProgressDialog(QObject::tr("Downloading update…"), QString(), 0, 100, parent);
-                progress->setWindowTitle(QObject::tr("Update"));
+                progress = new QProgressDialog(QObject::tr("正在下载更新…"), QString(), 0, 100, parent);
+                progress->setWindowTitle(QObject::tr("更新"));
                 progress->setWindowModality(Qt::WindowModal);
                 progress->setCancelButton(nullptr);
                 progress->setMinimumDuration(0);
@@ -261,8 +261,8 @@ namespace NekoGui_update {
                         progress->deleteLater();
                         progress = nullptr;
                     }
-                    QMessageBox::warning(parent, QObject::tr("Update"),
-                                         QObject::tr("Cannot create the update file."));
+                    QMessageBox::warning(parent, QObject::tr("更新"),
+                                         QObject::tr("无法创建更新文件，请检查临时目录是否可写。"));
                     deleteLater();
                     return;
                 }
@@ -303,15 +303,15 @@ namespace NekoGui_update {
                         progress = nullptr;
                     }
                     if (error != QNetworkReply::NoError) {
-                        QMessageBox::warning(parent, QObject::tr("Update"),
-                                             QObject::tr("Download failed: %1").arg(errorString));
+                        QMessageBox::warning(parent, QObject::tr("更新"),
+                                             QObject::tr("下载失败：%1").arg(errorString));
                         deleteLater();
                         return;
                     }
                     if (expected > 0 && written != expected) {
                         QMessageBox::warning(
-                            parent, QObject::tr("Update"),
-                            QObject::tr("Download incomplete: %1 of %2 bytes.")
+                            parent, QObject::tr("更新"),
+                            QObject::tr("下载不完整：%1 / %2 字节。")
                                 .arg(QString::number(written), QString::number(expected)));
                         deleteLater();
                         return;
@@ -351,8 +351,8 @@ Expand-Archive -LiteralPath $Zip -DestinationPath $Dest -Force
                 // 解压走 Expand-Archive：路径通过 -File 参数传递，含中文/空格都不会被
                 // 代码页破坏，也不依赖系统 tar 的实现（Git for Windows 的 GNU tar 不认 zip）。
                 if (!extractZip(zipPath, payloadDir)) {
-                    QMessageBox::warning(parent, QObject::tr("Update"),
-                                         QObject::tr("Failed to extract the update package."));
+                    QMessageBox::warning(parent, QObject::tr("更新"),
+                                         QObject::tr("更新包解压失败。"));
                     deleteLater();
                     return;
                 }
@@ -369,8 +369,8 @@ Expand-Archive -LiteralPath $Zip -DestinationPath $Dest -Force
                     }
                 }
                 if (!QFile::exists(QDir(srcDir).filePath("rekobox.exe"))) {
-                    QMessageBox::warning(parent, QObject::tr("Update"),
-                                         QObject::tr("The update package does not contain rekobox.exe."));
+                    QMessageBox::warning(parent, QObject::tr("更新"),
+                                         QObject::tr("更新包中缺少 rekobox.exe。"));
                     deleteLater();
                     return;
                 }
@@ -378,9 +378,9 @@ Expand-Archive -LiteralPath $Zip -DestinationPath $Dest -Force
                 const auto dstDir = QApplication::applicationDirPath();
                 if (!QFileInfo(dstDir).isWritable()) {
                     QMessageBox::warning(
-                        parent, QObject::tr("Update"),
-                        QObject::tr("The install directory is not writable:\n%1\n\n"
-                                    "Move RekoBox to a writable folder, or run as administrator and retry.")
+                        parent, QObject::tr("更新"),
+                        QObject::tr("安装目录不可写：\n%1\n\n"
+                                    "请把 RekoBox 放到可写的目录，或以管理员身份运行后重试。")
                             .arg(dstDir));
                     deleteLater();
                     return;
@@ -389,8 +389,8 @@ Expand-Archive -LiteralPath $Zip -DestinationPath $Dest -Force
                 const auto scriptPath = QDir(tempDir).filePath("apply-update.ps1");
                 QFile script(scriptPath);
                 if (!script.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-                    QMessageBox::warning(parent, QObject::tr("Update"),
-                                         QObject::tr("Cannot write the update script."));
+                    QMessageBox::warning(parent, QObject::tr("更新"),
+                                         QObject::tr("无法写入更新脚本。"));
                     deleteLater();
                     return;
                 }
@@ -446,23 +446,23 @@ try {
                      "-Exe", QDir::toNativeSeparators(exePath),
                      "-AppPid", QString::number(QCoreApplication::applicationPid())});
                 if (!ok) {
-                    QMessageBox::warning(parent, QObject::tr("Update"),
-                                         QObject::tr("Failed to start the updater."));
+                    QMessageBox::warning(parent, QObject::tr("更新"),
+                                         QObject::tr("启动更新程序失败。"));
                     deleteLater();
                     return;
                 }
 
                 QMessageBox::information(
-                    parent, QObject::tr("Update"),
-                    QObject::tr("RekoBox will now close, replace its files and restart by itself.\n\n"
-                                "It may take a few seconds. Please do not start it manually during this time.\n"
-                                "If it fails, a log is kept at %%TEMP%%\\rekobox-update.log."));
+                    parent, QObject::tr("更新"),
+                    QObject::tr("RekoBox 即将关闭，自动替换文件并重新启动。\n\n"
+                                "这一步需要几秒钟，期间请不要手动打开程序。\n"
+                                "如果失败，日志保存在 %%TEMP%%\\rekobox-update.log。"));
                 qApp->quit();
             }
 
             void fail(const QString &message) {
                 if (manual) {
-                    QMessageBox::warning(parent, QObject::tr("Check update"), message);
+                    QMessageBox::warning(parent, QObject::tr("检查更新"), message);
                 }
                 deleteLater();
             }
@@ -483,10 +483,10 @@ try {
         // 只提示一次，避免每次启动都弹
         QFile::remove(logPath);
         QMessageBox::warning(
-            parent, QObject::tr("Update"),
-            QObject::tr("The last update did not complete, RekoBox is still on version %1.\n\n"
-                        "Reason:\n%2\n\n"
-                        "You can retry from the menu, or download the latest package from the releases page.")
+            parent, QObject::tr("更新"),
+            QObject::tr("上次更新没有完成，当前仍是 %1 版本。\n\n"
+                        "原因：\n%2\n\n"
+                        "可以再点一次「检查更新」重试，或到发布页手动下载最新包。")
                 .arg(QString(NKR_VERSION), content));
     }
 
@@ -495,8 +495,8 @@ try {
         static bool checking = false;
         if (checking) {
             if (manual) {
-                QMessageBox::information(parent, QObject::tr("Check update"),
-                                         QObject::tr("Already checking, please wait."));
+                QMessageBox::information(parent, QObject::tr("检查更新"),
+                                         QObject::tr("正在检查更新，请稍候。"));
             }
             return;
         }

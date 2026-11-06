@@ -78,8 +78,16 @@ namespace NekoGui {
         // First setup
         if (groups.empty()) {
             auto defaultGroup = NekoGui::ProfileManager::NewGroup();
-            defaultGroup->name = QObject::tr("Default");
+            defaultGroup->name = QObject::tr("默认");
             NekoGui::profileManager->AddGroup(defaultGroup);
+        }
+        // 旧版默认分组名是英文 Default，统一改成中文（只改显示名，gid 不变）
+        for (const auto &pair: groups) {
+            auto group = pair.second;
+            if (group != nullptr && group->name == "Default") {
+                group->name = QObject::tr("默认");
+                if (dataStore->active_routing == "Default") dataStore->active_routing = group->name;
+            }
         }
         //
         if (dataStore->flag_reorder) {

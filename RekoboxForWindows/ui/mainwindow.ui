@@ -26,7 +26,7 @@
       <item>
        <widget class="QToolButton" name="toolButton_program">
         <property name="text">
-         <string>Program</string>
+         <string>程序</string>
         </property>
         <property name="icon">
          <iconset theme="b-system-run">
@@ -49,7 +49,7 @@
       <item>
        <widget class="QToolButton" name="toolButton_preferences">
         <property name="text">
-         <string>Preferences</string>
+         <string>首选项</string>
         </property>
         <property name="icon">
          <iconset theme="b-preferences">
@@ -72,7 +72,7 @@
       <item>
        <widget class="QToolButton" name="toolButton_server">
         <property name="text">
-         <string>Server</string>
+         <string>服务器</string>
         </property>
         <property name="icon">
          <iconset theme="b-network-server">
@@ -93,6 +93,26 @@
        </widget>
       </item>
       <item>
+       <widget class="QToolButton" name="toolButton_update">
+        <property name="text">
+         <string>检查更新</string>
+        </property>
+        <property name="icon">
+         <iconset theme="b-system-software-update">
+          <normaloff>.</normaloff>.</iconset>
+        </property>
+        <property name="iconSize">
+         <size>
+          <width>24</width>
+          <height>24</height>
+         </size>
+        </property>
+        <property name="toolButtonStyle">
+         <enum>Qt::ToolButtonTextUnderIcon</enum>
+        </property>
+       </widget>
+      </item>
+      <item>
        <layout class="QVBoxLayout" name="verticalLayout_4">
         <item>
          <widget class="QCheckBox" name="checkBox_VPN">
@@ -103,14 +123,14 @@
            </sizepolicy>
           </property>
           <property name="text">
-           <string>Tun Mode</string>
+           <string>Tun 模式</string>
           </property>
          </widget>
         </item>
         <item>
          <widget class="QCheckBox" name="checkBox_SystemProxy">
           <property name="text">
-           <string>System Proxy</string>
+           <string>系统代理</string>
           </property>
          </widget>
         </item>
@@ -139,7 +159,7 @@
       <item>
        <widget class="QToolButton" name="toolButton_url_test">
         <property name="text">
-         <string>URL Test</string>
+         <string>延迟测试</string>
         </property>
         <property name="popupMode">
          <enum>QToolButton::InstantPopup</enum>
@@ -217,27 +237,27 @@
            </attribute>
            <column>
             <property name="text">
-             <string>Type</string>
+             <string>类型</string>
             </property>
            </column>
            <column>
             <property name="text">
-             <string>Address</string>
+             <string>地址</string>
             </property>
            </column>
            <column>
             <property name="text">
-             <string>Name</string>
+             <string>名称</string>
             </property>
            </column>
            <column>
             <property name="text">
-             <string>Test Result</string>
+             <string>测试结果</string>
             </property>
            </column>
            <column>
             <property name="text">
-             <string>Traffic</string>
+             <string>流量</string>
             </property>
            </column>
           </widget>
@@ -254,7 +274,7 @@
           </property>
           <widget class="QWidget" name="tab">
            <attribute name="title">
-            <string>Log</string>
+            <string>日志</string>
            </attribute>
            <layout class="QVBoxLayout" name="verticalLayout">
             <property name="spacing">
@@ -286,7 +306,7 @@
           </widget>
           <widget class="QWidget" name="tab_2">
            <attribute name="title">
-            <string>Connection</string>
+            <string>连接</string>
            </attribute>
            <layout class="QVBoxLayout" name="verticalLayout_2">
             <property name="spacing">
@@ -326,17 +346,17 @@
               </attribute>
               <column>
                <property name="text">
-                <string>Status</string>
+                <string>状态</string>
                </property>
               </column>
               <column>
                <property name="text">
-                <string>Outbound</string>
+                <string>出站</string>
                </property>
               </column>
               <column>
                <property name="text">
-                <string>Destination</string>
+                <string>目标地址</string>
                </property>
               </column>
              </widget>
@@ -403,11 +423,11 @@
    </property>
    <widget class="QMenu" name="menu_program">
     <property name="title">
-     <string>Program</string>
+     <string>程序</string>
     </property>
     <widget class="QMenu" name="menu_spmode">
      <property name="title">
-      <string>System Proxy</string>
+      <string>系统代理</string>
      </property>
      <addaction name="menu_spmode_system_proxy"/>
      <addaction name="menu_spmode_vpn"/>
@@ -415,19 +435,19 @@
     </widget>
     <widget class="QMenu" name="menu_program_preference">
      <property name="title">
-      <string>Preferences</string>
+      <string>首选项</string>
      </property>
      <addaction name="actionfake"/>
     </widget>
     <widget class="QMenu" name="menuActive_Server">
      <property name="title">
-      <string>Active Server</string>
+      <string>当前服务器</string>
      </property>
      <addaction name="actionfake_2"/>
     </widget>
     <widget class="QMenu" name="menuActive_Routing">
      <property name="title">
-      <string>Active Routing</string>
+      <string>当前路由</string>
      </property>
      <addaction name="actionfake_3"/>
     </widget>
@@ -450,7 +470,7 @@
    </widget>
    <widget class="QMenu" name="menu_preferences">
     <property name="title">
-     <string>Preferences</string>
+     <string>首选项</string>
     </property>
     <addaction name="menu_manage_groups"/>
     <addaction name="menu_basic_settings"/>
@@ -461,11 +481,11 @@
    </widget>
    <widget class="QMenu" name="menu_server">
     <property name="title">
-     <string>Server</string>
+     <string>服务器</string>
     </property>
     <widget class="QMenu" name="menu_share_item">
      <property name="title">
-      <string>Share</string>
+      <string>分享</string>
      </property>
      <addaction name="menu_qr"/>
      <addaction name="menu_export_config"/>
@@ -475,7 +495,7 @@
     </widget>
     <widget class="QMenu" name="menuCurrent_Group">
      <property name="title">
-      <string>Current Group</string>
+      <string>当前分组</string>
      </property>
      <addaction name="actionfake_5"/>
      <addaction name="menu_tcp_ping"/>
@@ -492,7 +512,7 @@
     </widget>
     <widget class="QMenu" name="menuCurrent_Select">
      <property name="title">
-      <string>Current Select</string>
+      <string>当前选择</string>
      </property>
      <addaction name="actionfake_4"/>
     </widget>
@@ -522,32 +542,32 @@
   </widget>
   <action name="menu_exit">
    <property name="text">
-    <string>Exit</string>
+    <string>退出</string>
    </property>
   </action>
   <action name="actionShow_window">
    <property name="text">
-    <string>Show Window</string>
+    <string>显示窗口</string>
    </property>
   </action>
   <action name="menu_basic_settings">
    <property name="text">
-    <string>Basic Settings</string>
+    <string>基本设置</string>
    </property>
   </action>
   <action name="menu_add_from_input">
    <property name="text">
-    <string>New profile</string>
+    <string>新建配置</string>
    </property>
   </action>
   <action name="menu_manage_groups">
    <property name="text">
-    <string>Groups</string>
+    <string>分组</string>
    </property>
   </action>
   <action name="menu_start">
    <property name="text">
-    <string>Start</string>
+    <string>启动</string>
    </property>
    <property name="shortcut">
     <string notr="true">Return</string>
@@ -555,7 +575,7 @@
   </action>
   <action name="menu_stop">
    <property name="text">
-    <string>Stop</string>
+    <string>停止</string>
    </property>
    <property name="shortcut">
     <string notr="true">Ctrl+S</string>
@@ -563,12 +583,12 @@
   </action>
   <action name="menu_routing_settings">
    <property name="text">
-    <string>Routing Settings</string>
+    <string>路由设置</string>
    </property>
   </action>
   <action name="menu_add_from_clipboard">
    <property name="text">
-    <string>Add profile from clipboard</string>
+    <string>从剪贴板添加配置</string>
    </property>
    <property name="shortcut">
     <string notr="true">Ctrl+V</string>
@@ -576,7 +596,7 @@
   </action>
   <action name="menu_delete">
    <property name="text">
-    <string>Delete</string>
+    <string>删除</string>
    </property>
    <property name="shortcut">
     <string notr="true">Del</string>
@@ -584,17 +604,17 @@
   </action>
   <action name="menu_add_from_clipboard2">
    <property name="text">
-    <string>Add profile from clipboard</string>
+    <string>从剪贴板添加配置</string>
    </property>
   </action>
   <action name="menu_profile_debug_info">
    <property name="text">
-    <string>Debug Info</string>
+    <string>调试信息</string>
    </property>
   </action>
   <action name="menu_qr">
    <property name="text">
-    <string>QR Code and link</string>
+    <string>二维码与链接</string>
    </property>
    <property name="shortcut">
     <string notr="true">Ctrl+Q</string>
@@ -602,7 +622,7 @@
   </action>
   <action name="menu_copy_link">
    <property name="text">
-    <string>Copy Link</string>
+    <string>复制链接</string>
    </property>
   </action>
   <action name="menu_tcp_ping">
@@ -623,7 +643,7 @@
   </action>
   <action name="menu_clear_test_result">
    <property name="text">
-    <string>Clear Test Result</string>
+    <string>清空测试结果</string>
    </property>
    <property name="shortcut">
     <string notr="true">Ctrl+Alt+C</string>
@@ -631,7 +651,7 @@
   </action>
   <action name="menu_export_config">
    <property name="text">
-    <string>Export %1 config</string>
+    <string>导出 %1 配置</string>
    </property>
    <property name="shortcut">
     <string notr="true">Ctrl+E</string>
@@ -639,7 +659,7 @@
   </action>
   <action name="menu_reset_traffic">
    <property name="text">
-    <string>Reset Traffic</string>
+    <string>重置流量</string>
    </property>
    <property name="shortcut">
     <string notr="true">Ctrl+R</string>
@@ -647,7 +667,7 @@
   </action>
   <action name="menu_scan_qr">
    <property name="text">
-    <string>Scan QR Code</string>
+    <string>扫描二维码</string>
    </property>
   </action>
   <action name="menu_spmode_system_proxy">
@@ -655,7 +675,7 @@
     <bool>true</bool>
    </property>
    <property name="text">
-    <string>Enable System Proxy</string>
+    <string>启用系统代理</string>
    </property>
   </action>
   <action name="menu_spmode_disabled">
@@ -663,12 +683,12 @@
     <bool>true</bool>
    </property>
    <property name="text">
-    <string>Disable</string>
+    <string>禁用</string>
    </property>
   </action>
   <action name="menu_delete_repeat">
    <property name="text">
-    <string>Remove Duplicates</string>
+    <string>移除重复</string>
    </property>
    <property name="shortcut">
     <string notr="true">Ctrl+Alt+D</string>
@@ -684,7 +704,7 @@
   </action>
   <action name="menu_move">
    <property name="text">
-    <string>Move</string>
+    <string>移动</string>
    </property>
    <property name="shortcut">
     <string notr="true">Ctrl+M</string>
@@ -695,7 +715,7 @@
     <bool>true</bool>
    </property>
    <property name="text">
-    <string>Start with system</string>
+    <string>开机自启</string>
    </property>
   </action>
   <action name="actionRemember_last_proxy">
@@ -703,7 +723,7 @@
     <bool>true</bool>
    </property>
    <property name="text">
-    <string>Remember last profile</string>
+    <string>记住上次的配置</string>
    </property>
   </action>
   <action name="actionAllow_LAN">
@@ -711,12 +731,12 @@
     <bool>true</bool>
    </property>
    <property name="text">
-    <string>Allow other devices to connect</string>
+    <string>允许其它设备连接</string>
    </property>
   </action>
   <action name="menu_remove_unavailable">
    <property name="text">
-    <string>Remove Unavailable</string>
+    <string>移除不可用</string>
    </property>
    <property name="shortcut">
     <string notr="true">Ctrl+Alt+R</string>
@@ -724,7 +744,7 @@
   </action>
   <action name="menu_full_test">
    <property name="text">
-    <string>Full Test</string>
+    <string>完整测试</string>
    </property>
    <property name="shortcut">
     <string notr="true">Ctrl+Alt+F</string>
@@ -732,12 +752,12 @@
   </action>
   <action name="menu_hotkey_settings">
    <property name="text">
-    <string>Hotkey Settings</string>
+    <string>快捷键设置</string>
    </property>
   </action>
   <action name="menu_select_all">
    <property name="text">
-    <string>Select All</string>
+    <string>全选</string>
    </property>
    <property name="shortcut">
     <string notr="true">Ctrl+A</string>
@@ -745,7 +765,7 @@
   </action>
   <action name="menu_copy_links_nkr">
    <property name="text">
-    <string>Copy links of selected (Neko Links)</string>
+    <string>复制选中项的链接（Neko 格式）</string>
    </property>
    <property name="shortcut">
     <string notr="true">Ctrl+N</string>
@@ -769,7 +789,7 @@
   </action>
   <action name="menu_copy_links">
    <property name="text">
-    <string>Copy links of selected</string>
+    <string>复制选中项的链接</string>
    </property>
    <property name="shortcut">
     <string notr="true">Ctrl+C</string>
@@ -780,12 +800,12 @@
     <bool>true</bool>
    </property>
    <property name="text">
-    <string>Enable Tun</string>
+    <string>启用 Tun</string>
    </property>
   </action>
   <action name="menu_clone">
    <property name="text">
-    <string>Clone</string>
+    <string>克隆</string>
    </property>
    <property name="shortcut">
     <string notr="true">Ctrl+D</string>
@@ -793,7 +813,7 @@
   </action>
   <action name="menu_update_subscription">
    <property name="text">
-    <string>Update subscription</string>
+    <string>更新订阅</string>
    </property>
    <property name="shortcut">
     <string notr="true">Ctrl+U</string>
@@ -801,7 +821,7 @@
   </action>
   <action name="menu_resolve_domain">
    <property name="text">
-    <string>Resolve domain</string>
+    <string>解析域名</string>
    </property>
    <property name="shortcut">
     <string notr="true">Ctrl+Alt+I</string>
@@ -809,22 +829,22 @@
   </action>
   <action name="menu_vpn_settings">
    <property name="text">
-    <string>Tun Settings</string>
+    <string>Tun 设置</string>
    </property>
   </action>
   <action name="actionCheck_Update">
    <property name="text">
-    <string>Check for updates</string>
+    <string>检查更新</string>
    </property>
   </action>
   <action name="actionRestart_Program">
    <property name="text">
-    <string>Restart Program</string>
+    <string>重启程序</string>
    </property>
   </action>
   <action name="menu_open_config_folder">
    <property name="text">
-    <string>Open Config Folder</string>
+    <string>打开配置目录</string>
    </property>
   </action>
   <action name="actionfake_4">
@@ -845,12 +865,12 @@
   </action>
   <action name="actionRestart_Proxy">
    <property name="text">
-    <string>Restart Proxy</string>
+    <string>重启代理</string>
    </property>
   </action>
   <action name="menu_stop_testing">
    <property name="text">
-    <string>Stop Testing</string>
+    <string>停止测试</string>
    </property>
    <property name="shortcut">
     <string notr="true">Ctrl+Alt+S</string>

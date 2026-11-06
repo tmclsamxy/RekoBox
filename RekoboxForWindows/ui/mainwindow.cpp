@@ -439,6 +439,9 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
 
     if (!NekoGui::dataStore->flag_tray) show();
 
+    // 上次更新若没替换成功（脚本会留日志），先告诉用户，别让他以为已经升级
+    QTimer::singleShot(1500, this, [this] { NekoGui_update::CheckLastUpdateResult(this); });
+
     // 启动后静默检查更新：只在新版本存在时弹窗，失败不打扰
     QTimer::singleShot(8000, this, [this] { NekoGui_update::CheckForUpdates(this, false); });
 }

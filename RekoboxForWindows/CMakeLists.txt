@@ -29,6 +29,14 @@ if (NKR_CROSS)
     set_property(TARGET Qt5::lupdate PROPERTY IMPORTED_LOCATION /usr/bin/lupdate)
 endif ()
 
+#### Version for Windows resource (exe properties) ####
+# windows.cmake 在 nkr.cmake 之前 include，这里先解析，否则资源版本恒为 1.0.0.0
+file(STRINGS nekoray_version.txt NKR_RC_VERSION)
+string(REPLACE "." ";" NKR_RC_PARTS "${NKR_RC_VERSION}")
+list(GET NKR_RC_PARTS 0 NKR_RC_MAJOR)
+list(GET NKR_RC_PARTS 1 NKR_RC_MINOR)
+list(GET NKR_RC_PARTS 2 NKR_RC_PATCH)
+
 #### Platform Variables ####
 if (WIN32)
     include("cmake/windows/windows.cmake")

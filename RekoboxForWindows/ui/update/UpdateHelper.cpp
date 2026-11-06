@@ -396,35 +396,42 @@ Expand-Archive -LiteralPath $Zip -DestinationPath $Dest -Force
                 }
                 // UTF-8 BOM：PowerShell 5.1 靠它识别编码，否则含中文路径会乱码
                 script.write("\xEF\xBB\xBF");
-                script.write(R"PS1(param([string]$Src, [string]$Dst, [string]$Exe)
+                script.write(R"PS1(param([string]$Src, [string]$Dst, [string]$Exe, [int]$AppPid)
 $ErrorActionPreference = 'Stop'
 $log = Join-Path $env:TEMP 'rekobox-update.log'
+function W($m) { "$(Get-Date -Format o) $m" | Out-File -FilePath $log -Encoding utf8 }
 try {
-    # 主进程刚发起退出，先给它时间真正结束
-    Start-Sleep -Seconds 2
-    $deadline = (Get-Date).AddSeconds(120)
-    while ((Get-Process -Name 'rekobox' -ErrorAction SilentlyContinue) -and ((Get-Date) -lt $deadline)) {
-        Start-Sleep -Milliseconds 500
+    W "start appPid=$AppPid dst=$Dst"
+    # 按 PID 精确等待主进程，进程名匹配在用户开了多份时会一直等下去
+    if ($AppPid -gt 0) {
+        try { Wait-Process -Id $AppPid -Timeout 60 -ErrorAction Stop }
+        catch { W "wait-pid: $($_.Exception.Message)" }
     }
-    # 进程消失后句柄不一定立刻释放，复制失败就重试
-    Start-Sleep -Seconds 2
-    $copied = $false
-    for ($i = 0; $i -lt 10; $i++) {
+    # 进程退出后 exe 句柄未必立刻释放，用独占打开探测到底能不能写
+    $exePath = Join-Path $Dst 'rekobox.exe'
+    $ready = $false
+    for ($i = 0; $i -lt 30; $i++) {
         try {
-            Copy-Item -Path (Join-Path $Src '*') -Destination $Dst -Recurse -Force -ErrorAction Stop
-            $copied = $true
+            $fs = [IO.File]::Open($exePath, 'Open', 'ReadWrite', 'None')
+            $fs.Close()
+            $ready = $true
             break
-        } catch {
-            Start-Sleep -Seconds 2
-        }
+        } catch { Start-Sleep -Milliseconds 1000 }
     }
-    if (-not $copied) { throw 'copy failed: target still locked' }
-    "updated at $(Get-Date -Format o)" | Out-File -FilePath $log -Encoding utf8
+    if (-not $ready) { throw 'exe still locked after 30s' }
+
+    # robocopy 对个别仍被占用的文件有内建重试，比 Copy-Item 一失败就整体放弃更稳
+    $out = robocopy $Src $Dst /E /IS /IT /R:3 /W:2 /NFL /NDL /NJH /NJS 2>&1
+    $rc = $LASTEXITCODE
+    if ($rc -ge 8) {
+        throw ("robocopy exit=$rc :: " + (($out | Select-Object -First 8) -join ' | '))
+    }
+    W "updated ok (robocopy exit=$rc)"
 } catch {
-    "failed: $_" | Out-File -FilePath $log -Encoding utf8
+    W "failed: $($_.Exception.Message)"
 } finally {
-    Start-Sleep -Milliseconds 500
-    try { Start-Process -FilePath $Exe } catch { }
+    Start-Sleep -Milliseconds 300
+    try { Start-Process -FilePath $Exe } catch { W "restart failed: $($_.Exception.Message)" }
     Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue
 }
 )PS1");
@@ -436,7 +443,8 @@ try {
                     {"-NoProfile", "-ExecutionPolicy", "Bypass", "-File", scriptPath,
                      "-Src", QDir::toNativeSeparators(srcDir),
                      "-Dst", QDir::toNativeSeparators(dstDir),
-                     "-Exe", QDir::toNativeSeparators(exePath)});
+                     "-Exe", QDir::toNativeSeparators(exePath),
+                     "-AppPid", QString::number(QCoreApplication::applicationPid())});
                 if (!ok) {
                     QMessageBox::warning(parent, QObject::tr("Update"),
                                          QObject::tr("Failed to start the updater."));
@@ -444,8 +452,11 @@ try {
                     return;
                 }
 
-                QMessageBox::information(parent, QObject::tr("Update"),
-                                         QObject::tr("RekoBox will close and restart to finish the update."));
+                QMessageBox::information(
+                    parent, QObject::tr("Update"),
+                    QObject::tr("RekoBox will now close, replace its files and restart by itself.\n\n"
+                                "It may take a few seconds. Please do not start it manually during this time.\n"
+                                "If it fails, a log is kept at %%TEMP%%\\rekobox-update.log."));
                 qApp->quit();
             }
 
@@ -458,6 +469,26 @@ try {
         };
 
     } // namespace
+
+    void CheckLastUpdateResult(QWidget *parent) {
+        const auto logPath = QDir(QStandardPaths::writableLocation(QStandardPaths::TempLocation))
+                                 .filePath("rekobox-update.log");
+        QFile log(logPath);
+        if (!log.open(QIODevice::ReadOnly)) return;
+        const auto content = QString::fromUtf8(log.readAll()).trimmed();
+        log.close();
+        // 成功的日志是 "updated ok"，失败的是 "... failed: 原因"
+        if (!content.contains("failed:", Qt::CaseInsensitive)) return;
+
+        // 只提示一次，避免每次启动都弹
+        QFile::remove(logPath);
+        QMessageBox::warning(
+            parent, QObject::tr("Update"),
+            QObject::tr("The last update did not complete, RekoBox is still on version %1.\n\n"
+                        "Reason:\n%2\n\n"
+                        "You can retry from the menu, or download the latest package from the releases page.")
+                .arg(QString(NKR_VERSION), content));
+    }
 
     void CheckForUpdates(QWidget *parent, bool manual) {
         // 启动检查与手动点击可能撞在一起，避免并发拉取

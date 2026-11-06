@@ -10,7 +10,14 @@ generate_product_version(
         COMPANY_NAME "rekobox"
         COMPANY_COPYRIGHT "rekobox"
         FILE_DESCRIPTION "rekobox"
+        VERSION_MAJOR ${NKR_RC_MAJOR}
+        VERSION_MINOR ${NKR_RC_MINOR}
+        VERSION_PATCH ${NKR_RC_PATCH}
 )
+# 让资源对象依赖生成的 VersionInfo.h，否则改版本号后 ninja 不会重编 .rc，
+# exe 属性里的版本会停留在上一次的值
+set_source_files_properties(${Q2RAY_RC} PROPERTIES
+        OBJECT_DEPENDS "${CMAKE_CURRENT_BINARY_DIR}/VersionInfo.h")
 add_definitions(-DUNICODE -D_UNICODE -DNOMINMAX)
 set(GUI_TYPE WIN32)
 if (MINGW)

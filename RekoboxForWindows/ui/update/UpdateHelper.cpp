@@ -399,26 +399,43 @@ Expand-Archive -LiteralPath $Zip -DestinationPath $Dest -Force
                 script.write(R"PS1(param([string]$Src, [string]$Dst, [string]$Exe, [int]$AppPid)
 $ErrorActionPreference = 'Stop'
 $log = Join-Path $env:TEMP 'rekobox-update.log'
-function W($m) { "$(Get-Date -Format o) $m" | Out-File -FilePath $log -Encoding utf8 }
+Remove-Item -LiteralPath $log -Force -ErrorAction SilentlyContinue
+function W($m) { "$(Get-Date -Format o) $m" | Out-File -FilePath $log -Encoding utf8 -Append }
 try {
     W "start appPid=$AppPid dst=$Dst"
-    # 按 PID 精确等待主进程，进程名匹配在用户开了多份时会一直等下去
+    # 按 PID 精确等待主进程
     if ($AppPid -gt 0) {
         try { Wait-Process -Id $AppPid -Timeout 60 -ErrorAction Stop }
         catch { W "wait-pid: $($_.Exception.Message)" }
     }
-    # 进程退出后 exe 句柄未必立刻释放，用独占打开探测到底能不能写
-    $exePath = Join-Path $Dst 'rekobox.exe'
-    $ready = $false
-    for ($i = 0; $i -lt 30; $i++) {
-        try {
-            $fs = [IO.File]::Open($exePath, 'Open', 'ReadWrite', 'None')
-            $fs.Close()
-            $ready = $true
+    # 内核 rekobox_core.exe 是 GUI 的子进程，GUI 退出不一定带走它。
+    # 它还占着 rekobox_core.exe 与本地端口，会导致替换失败 + 新内核起不来。
+    # 只处理安装目录下的进程：其它目录/用户手动开的实例不该被误杀。
+    $deadline = (Get-Date).AddSeconds(20)
+    while ($true) {
+        $procs = Get-Process -Name 'rekobox','rekobox_core' -ErrorAction SilentlyContinue |
+                 Where-Object { $_.Path -and $_.Path.StartsWith($Dst, 'OrdinalIgnoreCase') }
+        if (-not $procs) { break }
+        if ((Get-Date) -ge $deadline) {
+            W ("force kill: " + (($procs | ForEach-Object { "$($_.ProcessName):$($_.Id)" }) -join ','))
+            $procs | Stop-Process -Force -ErrorAction SilentlyContinue
+            Start-Sleep -Seconds 1
             break
-        } catch { Start-Sleep -Milliseconds 1000 }
+        }
+        Start-Sleep -Milliseconds 500
     }
-    if (-not $ready) { throw 'exe still locked after 30s' }
+    # 逐个探测要覆盖的可执行文件是否可写
+    foreach ($name in @('rekobox.exe','rekobox_core.exe')) {
+        $path = Join-Path $Dst $name
+        $ready = $false
+        for ($i = 0; $i -lt 30; $i++) {
+            try {
+                $fs = [IO.File]::Open($path, 'Open', 'ReadWrite', 'None')
+                $fs.Close(); $ready = $true; break
+            } catch { Start-Sleep -Milliseconds 1000 }
+        }
+        if (-not $ready) { throw "$name still locked after 30s" }
+    }
 
     # robocopy 对个别仍被占用的文件有内建重试，比 Copy-Item 一失败就整体放弃更稳
     $out = robocopy $Src $Dst /E /IS /IT /R:3 /W:2 /NFL /NDL /NJH /NJS 2>&1
@@ -457,7 +474,12 @@ try {
                     QObject::tr("RekoBox 即将关闭，自动替换文件并重新启动。\n\n"
                                 "这一步需要几秒钟，期间请不要手动打开程序。\n"
                                 "如果失败，日志保存在 %%TEMP%%\\rekobox-update.log。"));
-                qApp->quit();
+                // 走完整退出流程（停内核 / 关系统代理 / 保存配置）。
+                // 直接 qApp->quit() 会把 rekobox_core.exe 留在后台，它占着
+                // rekobox_core.exe 文件和本地端口，导致这次替换失败、新内核也起不来。
+                if (!QMetaObject::invokeMethod(parent, "on_menu_exit_triggered", Qt::QueuedConnection)) {
+                    qApp->quit();
+                }
             }
 
             void fail(const QString &message) {
@@ -486,7 +508,8 @@ try {
             parent, QObject::tr("更新"),
             QObject::tr("上次更新没有完成，当前仍是 %1 版本。\n\n"
                         "原因：\n%2\n\n"
-                        "可以再点一次「检查更新」重试，或到发布页手动下载最新包。")
+                        "最常见的原因是内核 rekobox_core.exe 仍在后台运行，占着文件与端口。\n"
+                        "关掉后台残留的 rekobox_core 进程后，再点一次「检查更新」即可重试。")
                 .arg(QString(NKR_VERSION), content));
     }
 

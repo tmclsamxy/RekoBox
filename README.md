@@ -27,7 +27,7 @@ Rekobox/
 | 平台 | 版本 | 产物 | 链接 |
 |---|---|---|---|
 | Android | v1.0.2 | 4 个 split APK | [releases/tag/v1.0.2](https://github.com/tmclsamxy/RekoBox/releases/tag/v1.0.2) |
-| Windows | win-v1.0.11 | `Rekobox-1.0.11-windows-x64-qt.zip` | [releases/tag/win-v1.0.11](https://github.com/tmclsamxy/RekoBox/releases/tag/win-v1.0.11) |
+| Windows | win-v1.0.12 | `Rekobox-1.0.12-windows-x64-qt.zip` | [releases/tag/win-v1.0.12](https://github.com/tmclsamxy/RekoBox/releases/tag/win-v1.0.12) |
 
 ## 架构差异（为什么不是一套代码编译两次）
 

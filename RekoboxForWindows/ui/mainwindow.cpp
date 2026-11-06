@@ -56,6 +56,7 @@ void UI_InitMainWindow() {
 
 MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWindow) {
     mainwindow = this;
+    core_process = nullptr; // 退出兜底会读它，先给个确定值
     MW_dialog_message = [=](const QString &a, const QString &b) {
         runOnUiThread([=] { dialog_message_impl(a, b); });
     };
@@ -441,6 +442,16 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
 
     if (!NekoGui::dataStore->flag_tray) show();
 
+    // 兜底：任何退出路径（包括直接 qApp->quit()）都要确保内核进程结束，
+    // 否则它会占着 rekobox_core.exe 和本地端口，下次启动报 bind 失败
+    connect(qApp, &QCoreApplication::aboutToQuit, this, [this] {
+        NekoGui::dataStore->prepare_exit = true;
+        if (core_process != nullptr && core_process->state() != QProcess::NotRunning) {
+            core_process->kill();
+            core_process->waitForFinished(2000);
+        }
+    });
+
     // 上次更新若没替换成功（脚本会留日志），先告诉用户，别让他以为已经升级
     QTimer::singleShot(1500, this, [this] { NekoGui_update::CheckLastUpdateResult(this); });
 
@@ -673,7 +684,11 @@ void MainWindow::on_menu_exit_triggered() {
         //
         hide();
         runOnNewThread([=] {
-            sem_stopped.acquire();
+            // 加超时：TUN 模式下关闭 tun 入站可能卡住 gRPC Stop，
+            // 没有超时的话 sem 永不释放，后台线程挂死，GUI 与内核都留在后台
+            if (!sem_stopped.tryAcquire(1, 15000)) {
+                MW_show_log("[Error] stop timeout, forcing exit");
+            }
             stop_core_daemon();
             runOnUiThread([=] {
                 on_menu_exit_triggered(); // continue exit progress
@@ -683,6 +698,14 @@ void MainWindow::on_menu_exit_triggered() {
     }
     //
     MF_release_runguard();
+
+    // 兜底：无论 gRPC Exit 是否成功，退出前直接结束内核进程。
+    // prepare_exit 已置位，CoreProcess 不会把它再拉起来。
+    NekoGui::dataStore->prepare_exit = true;
+    if (core_process != nullptr && core_process->state() != QProcess::NotRunning) {
+        core_process->kill();
+        core_process->waitForFinished(3000);
+    }
     if (exit_reason == 1) {
         QDir::setCurrent(QApplication::applicationDirPath());
         QProcess::startDetached("./updater", QStringList{});

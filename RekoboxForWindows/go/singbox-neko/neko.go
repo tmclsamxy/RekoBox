@@ -106,6 +106,13 @@ func Create(content []byte, statsOutbounds []string, platformWriter log.Platform
 		return nil, nil, E.Cause(err, "create service")
 	}
 
+	// 连接记录：GUI 的「连接」页从这里取数据。
+	// 1.12 的 ClashServer 不再暴露连接列表，只能自己挂 tracker。
+	defaultConnStore.reset()
+	if router := instance.Router(); router != nil {
+		router.AppendTracker(&connTracker{store: defaultConnStore})
+	}
+
 	osSignals := make(chan os.Signal, 1)
 	signal.Notify(osSignals, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 	go func() {

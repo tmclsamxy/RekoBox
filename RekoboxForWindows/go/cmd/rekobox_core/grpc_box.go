@@ -134,8 +134,9 @@ func (s *server) QueryStats(ctx context.Context, in *gen.QueryStatsReq) (out *ge
 }
 
 func (s *server) ListConnections(ctx context.Context, in *gen.EmptyReq) (*gen.ListConnectionsResp, error) {
+	// 连接记录由 neko 包里的 tracker 维护（sing-box 1.12 的 ClashServer 不再暴露连接列表）
 	out := &gen.ListConnectionsResp{
-		// TODO upstream api
+		NekorayConnectionsJson: neko.ConnectionsJSON(),
 	}
 	return out, nil
 }

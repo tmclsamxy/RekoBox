@@ -92,8 +92,8 @@ DialogBasicSettings::DialogBasicSettings(QWidget *parent)
     ui->sys_proxy_format->hide();
 #endif
 
-    // Style
-    ui->connection_statistics_box->setDisabled(true);
+    // 连接统计现在由核心的 tracker 提供数据（此前内核侧是空实现，开关被临时禁用）
+    ui->connection_statistics_box->setEnabled(true);
     //
     D_LOAD_BOOL(connection_statistics)
     D_LOAD_BOOL(start_minimal)

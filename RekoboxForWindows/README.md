@@ -142,8 +142,10 @@ rekobox_core.exe --disable-color run -c cfg.json   # mixed 入站正常 LISTENIN
 |---|---|
 | `sync/` | 客户端同步层：`SyncModel` 合并算法 / `SyncStore` 本地状态 / `SyncApi` HTTP / `SyncEngine` 状态机 |
 | `server/` | 服务端 `rekosync`（Go 标准库，单文件，无数据库），含 systemd unit |
+| `server/deploy.sh` | **服务器上**一键安装：装依赖与 Go → 拉源码 → 编译 → systemd → 建号 → 自检 |
+| `server/deploy-remote.sh` | **开发机上**远程部署：交叉编译后上传，或交给服务器自行编译 |
 | `ui/dialog_account.*` | 首选项 →「账号与同步」对话框 |
-| `libs/build_linux_sync.sh` | 交叉编译 Linux 服务端 |
+| `libs/build_linux_sync.sh` | 交叉编译 Linux 服务端（远程部署与 release 用） |
 
 要点：
 

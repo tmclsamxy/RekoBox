@@ -171,14 +171,24 @@ X-Auth-Token: <token>                # 兼容 curl 调试
 
 ### 一键部署（推荐）
 
-开发机上执行，交互式完成「交叉编译 → 上传 → 建账号 → 装 systemd → 自检 → 打印客户端地址」：
+**在服务器上跑**（全新 Ubuntu/Debian/CentOS/Alpine 都行，自动装依赖、装 Go、拉源码、编译、装服务）：
 
 ```bash
-cd RekoboxForWindows/server && bash deploy.sh
+cd Rekobox/RekoboxForWindows/server && bash deploy.sh
 ```
 
-口令不回显、不落盘、不进 `ps`（通过 stdin 传给 `-adduser`）；留空自动生成 20 位随机口令，
-只显示一次。服务器需 root 或免密 `sudo -n`。非交互用法见 `server/README.md`。
+没有仓库也没关系：随便放一份 `deploy.sh` 执行即可，它会自己 `git clone`
+（失败则下载源码包）。口令不回显、不落盘、不进 `ps`（通过 stdin 传给 `-adduser`），
+留空自动生成 20 位随机口令且只显示一次。
+
+**在开发机上跑**（Windows/macOS，SSH 推到服务器）：
+
+```bash
+cd RekoboxForWindows/server && bash deploy-remote.sh
+```
+
+本机有 Go 就只上传交叉编译好的二进制（服务器不需要 Go、不需要外网）；
+本机没 Go 就上传 `deploy.sh` 让服务器自己编译。非交互与环境变量用法见 `server/README.md`。
 
 ### 4.1 编译服务端
 
@@ -317,3 +327,5 @@ config/sync/meta.json    每个条目的内容指纹与 mtime、待同步墓碑
 | `db/ProxyEntity.hpp`、`db/Group.hpp` | 新增 `sync_id`（UUID）字段 |
 | `main/NekoGui_ConfigItem.hpp` | 新增 `callback_after_save`，用于感知本地改动 |
 | `server/*.go` | 服务端：`store.go` 存储、`auth.go` 口令令牌、`api.go` 路由、`main.go` CLI |
+| `server/deploy.sh` | 服务器端一键安装：装依赖/Go → 拉源码 → 编译 → systemd → 建号 → 自检 |
+| `server/deploy-remote.sh` | 开发机远程部署：交叉编译上传，或把安装脚本丢给服务器执行 |

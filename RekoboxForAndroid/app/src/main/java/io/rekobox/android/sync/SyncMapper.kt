@@ -4,11 +4,15 @@ import io.rekobox.android.database.ProxyEntity
 import io.rekobox.android.database.ProxyGroup
 import io.rekobox.android.fmt.AbstractBean
 import io.rekobox.android.fmt.http.HttpBean
+import io.rekobox.android.fmt.hysteria.HysteriaBean
+import io.rekobox.android.fmt.naive.NaiveBean
 import io.rekobox.android.fmt.shadowsocks.ShadowsocksBean
 import io.rekobox.android.fmt.socks.SOCKSBean
 import io.rekobox.android.fmt.trojan.TrojanBean
+import io.rekobox.android.fmt.tuic.TuicBean
 import io.rekobox.android.fmt.v2ray.StandardV2RayBean
 import io.rekobox.android.fmt.v2ray.VMessBean
+import io.rekobox.android.ktx.applyDefaultValues
 import org.json.JSONObject
 
 /**
@@ -38,17 +42,29 @@ object SyncMapper {
         } catch (_: Exception) {
             return null
         }
-        return when (bean) {
-            is VMessBean -> {
-                val typeName = if ((bean.alterId ?: 0) == -1) "vless" else "vmess"
-                typeName to v2rayToJson(bean, typeName)
-            }
+        return try {
+            when (bean) {
+                is VMessBean -> {
+                    val typeName = if ((bean.alterId ?: 0) == -1) "vless" else "vmess"
+                    typeName to v2rayToJson(bean, typeName)
+                }
 
-            is TrojanBean -> "trojan" to v2rayToJson(bean, "trojan")
-            is HttpBean -> "http" to httpToJson(bean)
-            is SOCKSBean -> "socks" to socksToJson(bean)
-            is ShadowsocksBean -> "shadowsocks" to ssToJson(bean)
-            else -> null
+                is TrojanBean -> "trojan" to v2rayToJson(bean, "trojan")
+                is HttpBean -> "http" to httpToJson(bean)
+                is SOCKSBean -> "socks" to socksToJson(bean)
+                is ShadowsocksBean -> "shadowsocks" to ssToJson(bean)
+                // hysteria v1 与 Windows 的 hysteria2 不是同一个东西，v1 交给 foreign 透传
+                is HysteriaBean ->
+                    if ((bean.protocolVersion ?: 2) == 1) null else "hysteria2" to hysteriaToJson(bean)
+
+                is TuicBean -> "tuic" to tuicToJson(bean)
+                is NaiveBean -> "naive" to naiveToJson(bean)
+                else -> null
+            }
+        } catch (e: Exception) {
+            // 单个条目出错不影响整轮同步：当作不支持，原样透传
+            io.rekobox.android.ktx.Logs.w("export profile failed", e)
+            null
         }
     }
 
@@ -144,6 +160,55 @@ object SyncMapper {
         return o
     }
 
+    /** nekoray QUICBean(proxy_Hysteria2)：password=认证串，obfsPassword=混淆密码 */
+    private fun hysteriaToJson(bean: HysteriaBean): JSONObject {
+        val o = base(bean)
+        bean.authPayload?.takeIf { it.isNotEmpty() }?.let { o.put("password", it) }
+        bean.obfuscation?.takeIf { it.isNotEmpty() }?.let { o.put("obfsPassword", it) }
+        (bean.uploadMbps ?: 0).takeIf { it > 0 }?.let { o.put("uploadMbps", it) }
+        (bean.downloadMbps ?: 0).takeIf { it > 0 }?.let { o.put("downloadMbps", it) }
+        bean.sni?.takeIf { it.isNotEmpty() }?.let { o.put("sni", it) }
+        bean.alpn?.takeIf { it.isNotEmpty() }?.let { o.put("alpn", it) }
+        if (bean.allowInsecure == true) o.put("allowInsecure", true)
+        bean.caText?.takeIf { it.isNotEmpty() }?.let { o.put("caText", it) }
+        (bean.hopInterval ?: 0).takeIf { it > 0 }?.let { o.put("hopInterval", it) }
+        // 端口跳跃：只有确实是一段范围时才有意义
+        val ports = bean.serverPorts ?: ""
+        if (ports.isNotEmpty() && ports != bean.serverPort?.toString()) o.put("hopPort", ports)
+        (bean.streamReceiveWindow ?: 0).takeIf { it > 0 }?.let { o.put("streamReceiveWindow", it) }
+        (bean.connectionReceiveWindow ?: 0).takeIf { it > 0 }?.let { o.put("connectionReceiveWindow", it) }
+        if (bean.disableMtuDiscovery == true) o.put("disableMtuDiscovery", true)
+        return o
+    }
+
+    /** nekoray QUICBean(proxy_TUIC)：password=token */
+    private fun tuicToJson(bean: TuicBean): JSONObject {
+        val o = base(bean)
+        bean.uuid?.takeIf { it.isNotEmpty() }?.let { o.put("uuid", it) }
+        bean.token?.takeIf { it.isNotEmpty() }?.let { o.put("password", it) }
+        bean.congestionController?.takeIf { it.isNotEmpty() }?.let { o.put("congestionControl", it) }
+        bean.udpRelayMode?.takeIf { it.isNotEmpty() }?.let { o.put("udpRelayMode", it) }
+        if (bean.reduceRTT == true) o.put("zeroRttHandshake", true)
+        bean.sni?.takeIf { it.isNotEmpty() }?.let { o.put("sni", it) }
+        bean.alpn?.takeIf { it.isNotEmpty() }?.let { o.put("alpn", it) }
+        if (bean.allowInsecure == true) o.put("allowInsecure", true)
+        if (bean.disableSNI == true) o.put("disableSni", true)
+        bean.caText?.takeIf { it.isNotEmpty() }?.let { o.put("caText", it) }
+        return o
+    }
+
+    private fun naiveToJson(bean: NaiveBean): JSONObject {
+        val o = base(bean)
+        bean.username?.takeIf { it.isNotEmpty() }?.let { o.put("username", it) }
+        bean.password?.takeIf { it.isNotEmpty() }?.let { o.put("password", it) }
+        bean.proto?.takeIf { it.isNotEmpty() }?.let { o.put("protocol", it) }
+        bean.extraHeaders?.takeIf { it.isNotEmpty() }?.let { o.put("extra_headers", it) }
+        bean.sni?.takeIf { it.isNotEmpty() }?.let { o.put("sni", it) }
+        bean.certificates?.takeIf { it.isNotEmpty() }?.let { o.put("certificate", it) }
+        (bean.insecureConcurrency ?: 0).takeIf { it > 0 }?.let { o.put("insecure_concurrency", it) }
+        return o
+    }
+
     // ---------- 导入 ----------
 
     /** 由 Windows 条目数据构造 Android bean；不支持的类型返回 null */
@@ -192,10 +257,60 @@ object SyncMapper {
                     bean.plugin = beanJson.optString("plugin")
                 }
 
+                "hysteria2" -> HysteriaBean().also { bean ->
+                    applyBase(bean, beanJson)
+                    bean.protocolVersion = 2
+                    bean.authPayloadType = HysteriaBean.TYPE_STRING
+                    bean.authPayload = beanJson.optString("password")
+                    bean.obfuscation = beanJson.optString("obfsPassword")
+                    bean.uploadMbps = beanJson.optInt("uploadMbps", 0)
+                    bean.downloadMbps = beanJson.optInt("downloadMbps", 0)
+                    bean.sni = beanJson.optString("sni")
+                    bean.alpn = beanJson.optString("alpn")
+                    bean.allowInsecure = beanJson.optBoolean("allowInsecure")
+                    bean.caText = beanJson.optString("caText")
+                    bean.hopInterval = beanJson.optInt("hopInterval", 10)
+                    bean.serverPorts = beanJson.optString("hopPort")
+                        .ifEmpty { bean.serverPort?.toString() ?: "443" }
+                    bean.streamReceiveWindow = beanJson.optInt("streamReceiveWindow", 0)
+                    bean.connectionReceiveWindow = beanJson.optInt("connectionReceiveWindow", 0)
+                    bean.disableMtuDiscovery = beanJson.optBoolean("disableMtuDiscovery")
+                }
+
+                "tuic" -> TuicBean().also { bean ->
+                    applyBase(bean, beanJson)
+                    bean.protocolVersion = 5
+                    bean.uuid = beanJson.optString("uuid")
+                    bean.token = beanJson.optString("password")
+                    bean.congestionController = beanJson.optString("congestionControl", "bbr")
+                    bean.udpRelayMode = beanJson.optString("udpRelayMode", "native")
+                    bean.reduceRTT = beanJson.optBoolean("zeroRttHandshake")
+                    bean.sni = beanJson.optString("sni")
+                    bean.alpn = beanJson.optString("alpn")
+                    bean.allowInsecure = beanJson.optBoolean("allowInsecure")
+                    bean.disableSNI = beanJson.optBoolean("disableSni")
+                    bean.caText = beanJson.optString("caText")
+                }
+
+                "naive" -> NaiveBean().also { bean ->
+                    applyBase(bean, beanJson)
+                    bean.username = beanJson.optString("username")
+                    bean.password = beanJson.optString("password")
+                    bean.proto = beanJson.optString("protocol", "https")
+                    bean.extraHeaders = beanJson.optString("extra_headers")
+                    bean.sni = beanJson.optString("sni")
+                    bean.certificates = beanJson.optString("certificate")
+                    bean.insecureConcurrency = beanJson.optInt("insecure_concurrency", 0)
+                }
+
                 else -> null
             }
         } catch (_: Exception) {
             null
+        }?.also {
+            // 必须补默认值：bean 的 serialize() 会直接 writeInt(protocol/mtu 等)，
+            // 这些 Integer 若为 null，落库时会 NPE（"Integer.intValue() on a null object"）
+            it.applyDefaultValues()
         }
     }
 

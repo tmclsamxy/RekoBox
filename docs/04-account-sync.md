@@ -363,10 +363,21 @@ config/sync/meta.json    每个条目的内容指纹与 mtime、待同步墓碑
 | vmess | ✅ | uuid / aid / 加密方式 + ws/grpc/h2/tcp + tls/reality |
 | vless | ✅ | uuid 放 `pass`，flow 放 `flow` |
 | trojan | ✅ | password + 同上传送层 |
-| 其它（ssr、trojan-go、naive、hysteria、tuic、wg、ssh、chain、config…） | 原样透传 | 安卓不解析、不修改、不删除，下次同步原样带回，Windows 侧仍然正常 |
+| hysteria2 | ✅ | 认证串、混淆密码、上下行带宽、sni/alpn、端口跳跃 |
+| tuic | ✅ | uuid + token、拥塞控制、UDP 中继模式、0-RTT |
+| naive | ✅ | 用户名口令、协议（https/quic）、额外请求头 |
+| hysteria v1、ssr、trojan-go、wg、ssh、chain、config… | 原样透传 | 安卓不解析、不修改、不删除，下次同步原样带回，Windows 侧仍然正常 |
 
-也就是说：安卓上能编辑的只有上表前五类；其余条目在安卓端**不可见**，但云端不会因此丢失。
+也就是说：安卓上能编辑的是上表前八类；其余条目在安卓端**不可见**，但云端不会因此丢失。
 后续要支持更多类型，只需在 `SyncMapper` 增加一对映射函数。
+
+两个实现细节（都踩过）：
+
+1. bean 落库前必须 `applyDefaultValues()`。`HysteriaBean.serialize()` 会直接
+   `writeInt(protocol)`、`TuicBean.serialize()` 会 `writeInt(mtu)`，这些 `Integer`
+   为 null 时写库直接 NPE（"Integer.intValue() on a null object"）。
+2. 组内顺序：导入时按 `order_ids` 校正本地 `userOrder`，导出时按 `userOrder` 生成
+   `order_ids`。否则安卓按创建顺序排列，再推回去会把 Windows 的排序打乱。
 
 ### 8.3 一致性与冲突
 
@@ -379,6 +390,8 @@ config/sync/meta.json    每个条目的内容指纹与 mtime、待同步墓碑
 ### 8.4 已知限制
 
 1. 安卓端固定直连同步服务器，没有「经代理同步」开关（服务端在境内时够用）。
-2. 单条节点的**部分高级字段**（如 mux 细分参数、xhttp 扩展）不参与互转，
+2. 单条节点的**部分高级字段**（如 mux 细分参数、xhttp 扩展、tuic 的 mtu/心跳）不参与互转，
    以两端都认识的字段为准；从 Windows 拉到安卓再改回，可能丢掉这些字段的差异。
-3. 未在真机上做完整回归（本轮只验证到编译与打包通过）。
+3. hysteria **v1** 与 Windows 的 hysteria2 不是同一个协议，安卓端按「看不懂」透传。
+4. 真机回归已覆盖：四种类型导入（列表显示正确类型）、组内顺序、删除传播（墓碑）；
+   未覆盖：订阅分组自动更新、大列表（>500 节点）。

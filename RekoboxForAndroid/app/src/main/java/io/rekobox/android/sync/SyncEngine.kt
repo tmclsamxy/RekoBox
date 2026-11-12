@@ -333,6 +333,13 @@ object SyncEngine {
             val uuid = SyncStore.uuidOf(SyncModel.KIND_GROUP, g.id) ?: return@forEach
             val data = SyncMapper.exportGroup(g)
             if (data.length() == 0) return@forEach
+            // 组内顺序：按本地 userOrder，翻译成 uuid 列表；空组不带这个键，
+            // 避免把 Windows 侧的排序清空
+            val ordered = SagerDatabase.proxyDao.getByGroup(g.id)
+                .mapNotNull { SyncStore.uuidOf(SyncModel.KIND_PROFILE, it.id) }
+            if (ordered.isNotEmpty()) {
+                data.put("order_ids", org.json.JSONArray().apply { ordered.forEach { put(it) } })
+            }
             val item = SyncModel.Item(SyncModel.KIND_GROUP, uuid, 0, data = data)
             stamp(item, firstBaseline)
             vault.groups.add(item)
@@ -466,7 +473,23 @@ object SyncEngine {
                     SyncStore.MetaEntry("", item.mtime)
             }
 
-            // 3) 删除分组（节点已按墓碑先删完）
+            // 3) 组内顺序：按远端的 order_ids 校正本地 userOrder，
+            //    否则安卓按创建顺序排列，再推回去会把 Windows 的排序打乱
+            vault.groups.filter { !it.deleted }.forEach { item ->
+                val orderIds = item.data?.optJSONArray("order_ids") ?: return@forEach
+                for (i in 0 until orderIds.length()) {
+                    val localId = SyncStore.localIdOf(SyncModel.KIND_PROFILE, orderIds.optString(i))
+                        ?: continue
+                    val profile = SagerDatabase.proxyDao.getById(localId) ?: continue
+                    val want = (i + 1).toLong()
+                    if (profile.userOrder != want) {
+                        profile.userOrder = want
+                        SagerDatabase.proxyDao.updateProxy(profile)
+                    }
+                }
+            }
+
+            // 4) 删除分组（节点已按墓碑先删完）
             vault.groups.filter { it.deleted }.forEach { item ->
                 val localId = SyncStore.localIdOf(SyncModel.KIND_GROUP, item.id)
                 if (localId != null && SagerDatabase.groupDao.allGroups().size > 1) {

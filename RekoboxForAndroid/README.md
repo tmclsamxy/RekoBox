@@ -61,9 +61,9 @@ Windows 本机构建的完整踩坑记录见 `../docs/03-release.md`；一键脚
 侧边抽屉菜单最上方「账号与同步」，位于「配置」之上。登录后把分组与节点同步到自建服务器，
 和 Windows 端共用同一套协议与账号，服务端无需改动。
 
-- 只同步可互转的类型：**socks / http / shadowsocks / vmess / vless / trojan**；
-  其它类型（ssr、hysteria、tuic、wireguard、chain、config…）在安卓端不可见，
-  但会原样透传回服务端，不会因为安卓同步而丢失
+- 只同步可互转的类型：**socks / http / shadowsocks / vmess / vless / trojan /
+  hysteria2 / tuic / naive**；其它类型（hysteria v1、ssr、trojan-go、wireguard、
+  chain、config…）在安卓端不可见，但会原样透传回服务端，不会因为安卓同步而丢失
 - 令牌永久有效，只有主动注销、服务端改口令或删号才失效
 - 断网时改动照常落本地并置 `pending`，恢复后 5s→10s→…→5min 退避自动补推
 - 本地状态：`SharedPreferences("rekosync")` + `files/sync/meta.json`

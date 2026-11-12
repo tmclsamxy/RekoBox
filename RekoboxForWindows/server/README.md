@@ -34,12 +34,16 @@ bash deploy.sh          # 自动装 curl/git/Go → 编译 → 装 systemd → �
 
 ```bash
 bash deploy.sh -y                          # 全默认，不交互
+bash deploy.sh --port 9000                 # 换服务端口（默认 8080）
 bash deploy.sh --listen 127.0.0.1:8080     # 交给 nginx 反代
 bash deploy.sh --account bob --reset-password   # 给已有账号重设口令
 bash deploy.sh --src /root/Rekobox/RekoboxForWindows/server  # 指定源码目录
 bash deploy.sh --binary ./rekosync         # 直接装现成二进制，跳过编译
 bash deploy.sh --skip-deps                 # 不装系统依赖（已备好 go 时）
 ```
+
+交互运行时也会单独询问「服务端口」，回车保持 8080；想换端口直接敲数字即可。
+端口会同时用于 systemd 的 `-addr`、防火墙放行和最后打印的客户端地址。
 
 ### 方式 B：在开发机远程部署（Windows / macOS）
 

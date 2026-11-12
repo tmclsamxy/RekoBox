@@ -32,7 +32,14 @@ step() { printf '\n%s==>%s %s\n' "$C_OK" "$C_END" "$*"; }
 trap 'rc=$?; if [ $rc -ne 0 ]; then printf "\n%s[x]%s 第 %s 行失败（退出码 %s）。日志：journalctl -u rekosync -n 50\n" "$C_ERR" "$C_END" "$LINENO" "$rc" >&2; fi' ERR
 
 # ---------- 参数 ----------
-LISTEN=":8080"
+LISTEN=""
+LISTEN_SET=0
+PORT_SET=0
+if [ -n "${SERVICE_PORT:-}" ]; then
+  PORT_SET=1
+else
+  SERVICE_PORT="8080"
+fi
 INSTALL_DIR="/opt/rekosync"
 ACCOUNT="alice"
 PASSWORD=""
@@ -53,7 +60,8 @@ usage() {
 
   -h, --help           显示帮助
   -y, --yes            全部用默认值，不交互（适合脚本化）
-      --listen ADDR    监听地址，默认 :8080（只给 nginx 反代就写 127.0.0.1:8080）
+      --listen ADDR    监听地址，默认 :<端口>（只给 nginx 反代就写 127.0.0.1:<端口>）
+      --port N         服务端口，默认 8080；等价于 --listen :N
       --dir PATH       安装目录，默认 /opt/rekosync
       --account NAME   同步账号名，默认 alice
       --password PASS  账号口令；不填则交互输入，留空自动生成随机口令
@@ -76,7 +84,8 @@ while [ $# -gt 0 ]; do
   case "$1" in
     -h|--help) usage; exit 0 ;;
     -y|--yes) ASSUME_YES=1 ;;
-    --listen) LISTEN="${2:?缺参数}"; shift ;;
+    --listen) LISTEN="${2:?缺参数}"; LISTEN_SET=1; shift ;;
+    --port) SERVICE_PORT="${2:?缺参数}"; PORT_SET=1; shift ;;
     --dir) INSTALL_DIR="${2:?缺参数}"; shift ;;
     --account) ACCOUNT="${2:?缺参数}"; shift ;;
     --password) PASSWORD="${2:?缺参数}"; PASSWORD_SET=1; shift ;;
@@ -124,6 +133,12 @@ rand_pass() {
   if [ -n "$p" ]; then printf '%s' "$p"; else printf 'Reko-%s' "$(date +%s)"; fi
 }
 
+valid_port() {
+  case "$1" in ''|*[!0-9]*) return 1 ;; esac
+  [ "$1" -ge 1 ] && [ "$1" -le 65535 ]
+}
+
+
 # ---------- 0. 前置 ----------
 [ "$(uname -s)" = "Linux" ] || die "本脚本要在 Linux 服务器上运行；从 Windows/macOS 远程部署请用 deploy-remote.sh"
 
@@ -148,6 +163,24 @@ case "$ARCH_RAW" in
   aarch64|arm64) GO_ARCH="arm64" ;;
   *) die "不支持的 CPU 架构：$ARCH_RAW（Go 也只剩 amd64/arm64 可用）" ;;
 esac
+
+# ---------- 端口 ----------
+# --listen 直接给完整地址时优先；否则按端口拼 :PORT，并支持交互修改
+if [ "$LISTEN_SET" = 0 ]; then
+  if [ "$PORT_SET" = 0 ] && have_tty && [ "$ASSUME_YES" = 0 ]; then
+    echo
+    say "安装参数"
+    while :; do
+      INPUT_PORT=""
+      read -r -p "服务端口（1-65535）[$SERVICE_PORT]: " INPUT_PORT || true
+      INPUT_PORT="${INPUT_PORT:-$SERVICE_PORT}"
+      if valid_port "$INPUT_PORT"; then SERVICE_PORT="$INPUT_PORT"; break; fi
+      warn "端口要在 1-65535 之间"
+    done
+  fi
+  valid_port "$SERVICE_PORT" || die "端口不合法：$SERVICE_PORT（应为 1-65535 的整数）"
+  LISTEN=":$SERVICE_PORT"
+fi
 
 echo
 say "RekoBox 节点同步服务 · 一键安装"
@@ -496,5 +529,5 @@ fi
 
 echo
 warn "HTTP 明文：口令与节点配置在链路上可见。"
-note "公网长期使用：--listen 127.0.0.1:8080 前置 nginx + TLS，客户端地址改 https://"
+note "公网长期使用：--listen 127.0.0.1:$FW_PORT 前置 nginx + TLS，客户端地址改 https://"
 echo

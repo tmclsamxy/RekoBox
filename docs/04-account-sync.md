@@ -181,6 +181,10 @@ cd Rekobox/RekoboxForWindows/server && bash deploy.sh
 （失败则下载源码包）。口令不回显、不落盘、不进 `ps`（通过 stdin 传给 `-adduser`），
 留空自动生成 20 位随机口令且只显示一次。
 
+端口默认 8080，交互运行时会单独询问，也可以 `--port 9000` 指定；
+想只对本机开放（前置 nginx）用 `--listen 127.0.0.1:8080`。
+改端口后 systemd 的 `-addr`、防火墙放行、输出的客户端地址会一起变。
+
 **在开发机上跑**（Windows/macOS，SSH 推到服务器）：
 
 ```bash

@@ -35,8 +35,11 @@ usage() {
       --no-build        不在本机编译，直接用现有 dist/ 里的二进制
       --force-remote-build  忽略本机二进制，让服务器自己装 Go + 编译
       --arch ARCH       目标架构，默认 amd64（服务器是 arm 就写 arm64）
+      --port N          服务端口，默认 8080（等价于 --listen :N）
+      --listen ADDR     完整监听地址，如 127.0.0.1:8080（走 nginx 时用）
 
-可预填环境变量: HOST / USER / PORT / SSH_KEY / REMOTE_DIR / LISTEN / ACCOUNT / PASSWORD / OPEN_FW
+可预填环境变量: HOST / USER / PORT(SSH) / SSH_KEY / REMOTE_DIR / LISTEN / SERVICE_PORT /
+              ACCOUNT / PASSWORD / OPEN_FW
 EOF
 }
 
@@ -45,13 +48,15 @@ SSH_USER="${USER:-root}"
 PORT="${PORT:-22}"
 SSH_KEY="${SSH_KEY:-}"
 REMOTE_DIR="${REMOTE_DIR:-/opt/rekosync}"
-LISTEN="${LISTEN:-:8080}"
+LISTEN="${LISTEN:-}"
+SERVICE_PORT="${SERVICE_PORT:-8080}"
 ACCOUNT="${ACCOUNT:-alice}"
 PASSWORD="${PASSWORD:-}"
 OPEN_FW="${OPEN_FW:-}"
 TARGET_ARCH="amd64"
 DO_BUILD=1
 FORCE_REMOTE=0
+PORT_SET=0
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -59,6 +64,8 @@ while [ $# -gt 0 ]; do
     --no-build) DO_BUILD=0 ;;
     --force-remote-build) FORCE_REMOTE=1 ;;
     --arch) TARGET_ARCH="${2:?缺参数}"; shift ;;
+    --port) SERVICE_PORT="${2:?缺参数}"; PORT_SET=1; shift ;;
+    --listen) LISTEN="${2:?缺参数}"; shift ;;
     *) die "未知参数：$1（-h 看帮助）" ;;
   esac
   shift
@@ -101,8 +108,17 @@ ask "SSH 私钥（留空用默认密钥/ssh-agent）" "" SSH_KEY
 
 echo
 say "安装参数"
-ask "安装目录" "/opt/rekosync" REMOTE_DIR
-ask "监听地址（:8080 对外 / 127.0.0.1:8080 走 nginx）" ":8080" LISTEN
+ask "安装目录" "$REMOTE_DIR" REMOTE_DIR
+if [ -z "$LISTEN" ]; then
+  ask "服务端口（1-65535）" "$SERVICE_PORT" SERVICE_PORT
+  case "$SERVICE_PORT" in ''|*[!0-9]*) die "端口不合法：$SERVICE_PORT（应为 1-65535 的整数）" ;; esac
+  if [ "$SERVICE_PORT" -lt 1 ] || [ "$SERVICE_PORT" -gt 65535 ]; then
+    die "端口要在 1-65535 之间：$SERVICE_PORT"
+  fi
+  LISTEN=":$SERVICE_PORT"
+else
+  note "监听地址（来自参数/环境变量）：$LISTEN"
+fi
 ask "同步账号名（输入 - 跳过建号）" "alice" ACCOUNT
 if [ "$ACCOUNT" = "-" ]; then ACCOUNT=""; fi
 

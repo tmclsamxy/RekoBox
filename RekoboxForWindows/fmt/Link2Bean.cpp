@@ -71,7 +71,10 @@ namespace NekoGui_fmt {
         if (!sni1.isEmpty()) stream->sni = sni1;
         if (!sni2.isEmpty()) stream->sni = sni2;
         stream->alpn = GetQueryValue(query, "alpn");
-        if (!query.queryItemValue("allowInsecure").isEmpty()) stream->allow_insecure = true;
+        // allowInsecure=0 / insecure=0 不能当成 true；旧实现只看“参数是否存在”
+        auto insecureVal = GetQueryValue(query, "allowInsecure");
+        if (insecureVal.isEmpty()) insecureVal = GetQueryValue(query, "insecure");
+        stream->allow_insecure = insecureVal == "1" || insecureVal.compare("true", Qt::CaseInsensitive) == 0;
         stream->reality_pbk = GetQueryValue(query, "pbk", "");
         stream->reality_sid = GetQueryValue(query, "sid", "");
         stream->reality_spx = GetQueryValue(query, "spx", "");
@@ -103,6 +106,9 @@ namespace NekoGui_fmt {
         // protocol
         if (proxy_type == proxy_VLESS) {
             flow = GetQueryValue(query, "flow", "");
+            // VLESS Encryption：encryption=none 视作未启用，其余原样交给内核
+            auto enc = GetQueryValue(query, "encryption", "");
+            vless_encryption = enc == "none" ? "" : enc;
         }
 
         return !(password.isEmpty() || serverAddress.isEmpty());
@@ -201,7 +207,10 @@ namespace NekoGui_fmt {
             auto sni2 = GetQueryValue(query, "peer");
             if (!sni1.isEmpty()) stream->sni = sni1;
             if (!sni2.isEmpty()) stream->sni = sni2;
-            if (!query.queryItemValue("allowInsecure").isEmpty()) stream->allow_insecure = true;
+            // allowInsecure=0 / insecure=0 不能当成 true；旧实现只看“参数是否存在”
+            auto insecureVal = GetQueryValue(query, "allowInsecure");
+            if (insecureVal.isEmpty()) insecureVal = GetQueryValue(query, "insecure");
+            stream->allow_insecure = insecureVal == "1" || insecureVal.compare("true", Qt::CaseInsensitive) == 0;
             stream->reality_pbk = GetQueryValue(query, "pbk", "");
             stream->reality_sid = GetQueryValue(query, "sid", "");
             stream->reality_spx = GetQueryValue(query, "spx", "");

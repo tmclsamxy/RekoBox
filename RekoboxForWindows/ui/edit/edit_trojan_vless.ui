@@ -40,6 +40,20 @@
      </item>
     </widget>
    </item>
+   <item row="2" column="0">
+    <widget class="QLabel" name="encryption_l">
+     <property name="text">
+      <string notr="true">Encryption</string>
+     </property>
+    </widget>
+   </item>
+   <item row="2" column="1">
+    <widget class="MyLineEdit" name="encryption">
+     <property name="placeholderText">
+      <string notr="true">none / mlkem768x25519plus.native.0rtt.&lt;key&gt;</string>
+     </property>
+    </widget>
+   </item>
   </layout>
  </widget>
  <customwidgets>

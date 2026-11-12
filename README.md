@@ -8,7 +8,7 @@ Rekobox/
 ├── RekoboxForWindows/     Windows 版（nekoray 移植，Qt6 Widgets + MinGW）
 ├── RekoboxForMac/         macOS 版（规划中）
 ├── docs/                  改名清单、移植方案、发布流程
-├── sing-box/              内核源码（Android libcore 的 go.mod replace 目标，不入库）
+├── sing-box/              内核源码（Android libcore 与 Windows rekobox_core 共用，不入库）
 └── libneko/               Go 辅助库（同上，不入库）
 ```
 
@@ -17,7 +17,7 @@ Rekobox/
 | 平台 | 目录 | 当前状态 |
 |---|---|---|
 | **Android** | `RekoboxForAndroid/` | v1.0.1 已发布；`io.rekobox`，4 个 split ABI；改名基于 NekoBox |
-| **Windows** | `RekoboxForWindows/` | nekoray 4.0.1 移植：Qt6.7 + MinGW 构建通过，sing-box 1.12.19-neko 内核，已实机运行 |
+| **Windows** | `RekoboxForWindows/` | nekoray 4.0.1 移植：Qt6.7 + MinGW 构建通过，与 Android 共用 sing-box 内核（含 VLESS Encryption / Vision），已实机运行 |
 | **macOS** | `RekoboxForMac/` | 规划中，界面层参考 Windows 的 Qt 实现 |
 
 ## 发布

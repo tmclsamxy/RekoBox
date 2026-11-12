@@ -35,7 +35,7 @@ fi
 
 #### 2. Go 内核 ####
 echo "==> [2/5] 构建 rekobox_core.exe"
-[ -d _deps/sing-box ] || bash libs/get_source_local.sh
+[ -d ../sing-box/go.mod ] || bash libs/get_source_local.sh
 bash libs/apply_neko_patch.sh
 mkdir -p deployment/core
 CORE_OUT="$PWD/deployment/core/rekobox_core.exe"

@@ -69,7 +69,7 @@ namespace NekoGui_fmt {
             if (!flow.isEmpty()) {
                 query.addQueryItem("flow", flow);
             }
-            query.addQueryItem("encryption", "none");
+            query.addQueryItem("encryption", vless_encryption.isEmpty() ? "none" : vless_encryption);
         }
 
         url.setQuery(query);

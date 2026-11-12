@@ -163,6 +163,7 @@ namespace NekoGui_fmt {
             }
             outbound["uuid"] = password.trimmed();
             outbound["flow"] = flow;
+            if (!vless_encryption.isEmpty()) outbound["encryption"] = vless_encryption;
         } else {
             outbound["password"] = password;
         }

@@ -55,11 +55,13 @@
 
 ### 2.3 Go 内核
 
-- 三方源码改为**仓库内自带**（`_deps/sing-box`、`_deps/sing-quic`、`_deps/libneko`），
-  不再依赖 `../sing-box` 这类仓库外相对路径，避免与 Android 端内核源码互相覆盖
-- `go.mod` 的 `replace` 指向 `../../../_deps/*`
+- **与 Android 共用同一棵内核源码**：`replace github.com/sagernet/sing-box => ../../../../sing-box`
+  （仓库根目录 `sing-box/`，由 `libs/get_source_local.sh` 按 `get_source_env.sh` 的 commit 拉取）
+- 原因：`_deps/sing-box`（MatsuriDayo 1.12.x 快照）缺 `protocol/vless/encryption` 与 Vision，
+  导致 `encryption=mlkem768x25519plus...` + `xtls-rprx-vision` 的节点（argo/vision 类）在 Windows 端不可用
+- `_deps/` 现在只保留 `libneko`；`go/singbox-neko/` 由 `libs/apply_neko_patch.sh` overlay 到 `../sing-box/neko`
 - Go 1.25.4 构建（工程仍声明 `go 1.19`，不改模块声明以免触发依赖重解析）
-- 编译标签：`with_clash_api,with_gvisor,with_quic,with_wireguard,with_utls,with_ech`
+- 编译标签：`with_clash_api,with_v2ray_api,with_gvisor,with_quic,with_wireguard,with_utls`
 - 产物命名 `rekobox_core.exe`，`NekoGui.cpp` 的查找名已同步
 
 ### 2.4 品牌

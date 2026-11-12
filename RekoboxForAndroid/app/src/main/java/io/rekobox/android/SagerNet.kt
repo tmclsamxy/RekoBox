@@ -32,6 +32,7 @@ import io.rekobox.android.nb4a.NativeInterface
 import io.rekobox.android.nb4a.net.LocalResolverImpl
 import io.rekobox.android.nb4a.utils.JavaUtil
 import io.rekobox.android.nb4a.utils.cleanWebview
+import io.rekobox.android.sync.SyncEngine
 import java.io.File
 import androidx.work.Configuration as WorkConfiguration
 
@@ -88,6 +89,10 @@ class SagerNet : Application(),
                 }
 
                 updateNotificationChannels()
+            }
+            // 云端同步：登录状态下启动后自动拉一次，本地改动防抖自动推送
+            runOnDefaultDispatcher {
+                SyncEngine.init()
             }
         }
 

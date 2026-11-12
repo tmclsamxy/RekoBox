@@ -333,3 +333,52 @@ config/sync/meta.json    每个条目的内容指纹与 mtime、待同步墓碑
 | `server/*.go` | 服务端：`store.go` 存储、`auth.go` 口令令牌、`api.go` 路由、`main.go` CLI |
 | `server/deploy.sh` | 服务器端一键安装：装依赖/Go → 拉源码 → 编译 → systemd → 建号 → 自检 |
 | `server/deploy-remote.sh` | 开发机远程部署：交叉编译上传，或把安装脚本丢给服务器执行 |
+
+---
+
+## 8. Android 端
+
+安卓客户端用**同一套协议、同一台服务器**，服务端代码无需任何改动。
+入口：侧边抽屉菜单 →「账号与同步」，位置在「配置」之上。
+
+### 8.1 与 Windows 的差异
+
+| 关注点 | Windows | Android |
+|---|---|---|
+| 本地存储 | JSON 文件（`config/profiles/*.json`） | Room 数据库（`proxy_entities` / `proxy_groups`） |
+| 条目标识 | 实体自带 `sync_id` 字段 | 不改表结构，`sync_id` 与本地 id 的绑定存在 `files/sync/meta.json` |
+| 会话 | `config/sync/state.json` | `SharedPreferences("rekosync")` |
+| 同步引擎 | `sync/SyncEngine`（Qt 事件循环） | `sync/SyncEngine`（Kotlin 协程 + HttpURLConnection） |
+| 触发 | 启动 3s、改动防抖 5s、手动 | 同左（`ProfileManager.Listener` 感知增删改） |
+
+编解码统一在 `SyncMapper`：把 Android 的 bean 转成 nekoray 的简写 JSON（`_v/addr/port/id/aid/sec/stream{...}`），
+再包成 `{"type": "...", "bean": {...}}` 作为条目 `data`；反向同理。所以两端的节点是同一份数据。
+
+### 8.2 类型覆盖
+
+| 类型 | 互转 | 说明 |
+|---|---|---|
+| socks / http | ✅ | 含用户名口令、stream 传输层设置 |
+| shadowsocks | ✅ | method / password / plugin |
+| vmess | ✅ | uuid / aid / 加密方式 + ws/grpc/h2/tcp + tls/reality |
+| vless | ✅ | uuid 放 `pass`，flow 放 `flow` |
+| trojan | ✅ | password + 同上传送层 |
+| 其它（ssr、trojan-go、naive、hysteria、tuic、wg、ssh、chain、config…） | 原样透传 | 安卓不解析、不修改、不删除，下次同步原样带回，Windows 侧仍然正常 |
+
+也就是说：安卓上能编辑的只有上表前五类；其余条目在安卓端**不可见**，但云端不会因此丢失。
+后续要支持更多类型，只需在 `SyncMapper` 增加一对映射函数。
+
+### 8.3 一致性与冲突
+
+与 §3 完全相同：条目级 last-write-wins、墓碑表示删除、同一时刻删除优先、
+首次建立基线时以服务端为准（本地独有条目保留并上传）。
+
+安卓额外处理：分组只同步 `name`（订阅 `url` 仅在安卓有值时导出），
+分组内排序沿用各端本地顺序，避免把 Windows 的 int id 顺序写进另一端。
+
+### 8.4 已知限制
+
+1. 安卓端固定直连同步服务器，没有「经代理同步」开关（服务端在境内时够用）。
+2. 单条节点的**部分高级字段**（如 mux 细分参数、xhttp 扩展）不参与互转，
+   以两端都认识的字段为准；从 Windows 拉到安卓再改回，可能丢掉这些字段的差异。
+3. 未在真机上做完整回归（本轮只验证到编译与打包通过）。

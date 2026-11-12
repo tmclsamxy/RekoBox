@@ -698,4 +698,20 @@
     <string name="snell_quic_proxy_summary">v6 only: legacy v5 QUIC Proxy compatibility</string>
     <string name="snell_reuse_summary">v4-v6 only</string>
 
+    <!-- 账号与同步 -->
+    <string name="menu_account">Account &amp; sync</string>
+    <string name="account_server_hint">http://1.2.3.4:8080</string>
+    <string name="account_username">Username</string>
+    <string name="account_password">Password</string>
+    <string name="account_login">Sign in</string>
+    <string name="account_sync_now">Sync now</string>
+    <string name="account_logout">Sign out</string>
+    <string name="account_auto_sync">Upload local changes automatically</string>
+    <string name="account_hint">Accounts are created by the server administrator; this app has no sign-up. Once signed in the token stays valid until you sign out, or the server changes the password / deletes the account. Without signing in everything still works locally.</string>
+    <string name="account_current">%1$s @ %2$s</string>
+    <string name="account_not_logged_in">Not signed in (local only)</string>
+    <string name="account_logging_in">Signing in…</string>
+    <string name="account_syncing">Syncing…</string>
+    <string name="account_logged_out">Signed out</string>
+
 </resources>

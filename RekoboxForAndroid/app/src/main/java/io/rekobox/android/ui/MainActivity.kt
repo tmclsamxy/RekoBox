@@ -423,6 +423,10 @@ class MainActivity : ThemedActivity(),
 
     fun displayFragmentWithId(@IdRes id: Int): Boolean {
         when (id) {
+            R.id.nav_account -> {
+                displayFragment(AccountFragment())
+            }
+
             R.id.nav_configuration -> {
                 displayFragment(ConfigurationFragment())
             }

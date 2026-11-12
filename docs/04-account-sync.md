@@ -169,6 +169,17 @@ X-Auth-Token: <token>                # 兼容 curl 调试
 
 ## 4. 部署
 
+### 一键部署（推荐）
+
+开发机上执行，交互式完成「交叉编译 → 上传 → 建账号 → 装 systemd → 自检 → 打印客户端地址」：
+
+```bash
+cd RekoboxForWindows/server && bash deploy.sh
+```
+
+口令不回显、不落盘、不进 `ps`（通过 stdin 传给 `-adduser`）；留空自动生成 20 位随机口令，
+只显示一次。服务器需 root 或免密 `sudo -n`。非交互用法见 `server/README.md`。
+
 ### 4.1 编译服务端
 
 服务器上直接编（需 Go 1.21+，国内用 `goproxy.cn`）：

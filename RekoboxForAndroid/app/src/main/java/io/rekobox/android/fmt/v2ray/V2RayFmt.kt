@@ -151,6 +151,32 @@ fun parseV2Ray(link: String): StandardV2RayBean {
         bean.parseDuckSoft(url)
     }
 
+    // VLESS Encryption (ML-KEM-768): the `encryption` query value can be ~1600 chars.
+    // Some devices lose it between HttpUrl parsing and the bean->DB round trip, which
+    // makes the core emit a VLESS outbound without `encryption` and the server then
+    // never completes the ML-KEM handshake (symptom: silent timeout, upload only).
+    // Restore it straight from the raw link so parsing cannot drop it.
+    if (link.startsWith("vless://")) {
+        val encRaw = link.substringAfter('?', "")
+            .substringBefore('#')
+            .split('&')
+            .firstOrNull { it.startsWith("encryption=") }
+            ?.substringAfter("encryption=")
+        if (!encRaw.isNullOrBlank() && encRaw != "none" && bean.vlessEncryption.isNullOrBlank()) {
+            bean.vlessEncryption = encRaw
+            Logs.d("VLESS encryption restored from raw link (${encRaw.length} chars)")
+        }
+    }
+
+    // 旁路持久化：profile 的 Bean 在 DB 往返中会丢失这个超长字段（实测 UI 进程
+    // 读到 1920B、VPN 服务进程只读到 309B），导致下发给内核的 VLESS 出站缺少
+    // encryption，服务端在 ML-KEM 握手阶段直接断开（症状：只有上传流量）。
+    // 这里按 uuid 落一份原始值，配置构建时若 Bean 为空则回填。
+    val encToPersist = bean.vlessEncryption
+    if (!encToPersist.isNullOrBlank() && bean.uuid.isNotBlank()) {
+        runCatching { VlessEncryptionStore.put(bean.uuid, encToPersist) }
+    }
+
     return bean
 }
 

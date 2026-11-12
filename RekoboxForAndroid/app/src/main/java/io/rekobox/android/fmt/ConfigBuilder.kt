@@ -23,6 +23,7 @@ import io.rekobox.android.fmt.tuic.buildSingBoxOutboundTuicBean
 import io.rekobox.android.fmt.juicity.JuicityBean
 import io.rekobox.android.fmt.juicity.buildSingBoxOutboundJuicityBean
 import io.rekobox.android.fmt.v2ray.StandardV2RayBean
+import io.rekobox.android.fmt.v2ray.VlessEncryptionStore
 import io.rekobox.android.fmt.v2ray.buildSingBoxOutboundStandardV2RayBean
 import io.rekobox.android.fmt.shadowsocksr.ShadowsocksRBean
 import io.rekobox.android.fmt.shadowsocksr.buildSingBoxOutboundShadowsocksRBean
@@ -444,8 +445,16 @@ fun buildConfig(
                         is ShadowTLSBean -> // before StandardV2RayBean
                             buildSingBoxOutboundShadowTLSBean(bean)
 
-                        is StandardV2RayBean -> // http/trojan/vmess/vless
+                        is StandardV2RayBean -> { // http/trojan/vmess/vless
+                            // Bean 在 DB 往返中可能丢失超长的 VLESS encryption 串，
+                            // 回填导入时旁路保存的原始值（见 VlessEncryptionStore）
+                            if (bean.vlessEncryption.isNullOrBlank()) {
+                                VlessEncryptionStore.get(bean.uuid)?.let {
+                                    bean.vlessEncryption = it
+                                }
+                            }
                             buildSingBoxOutboundStandardV2RayBean(bean)
+                        }
 
                         is HysteriaBean ->
                             buildSingBoxOutboundHysteriaBean(bean)

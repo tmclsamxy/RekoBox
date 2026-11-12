@@ -66,7 +66,7 @@ class SagerNet : Application(),
                 filesDir.absolutePath + "/",
                 externalAssets.absolutePath + "/",
                 DataStore.logBufSize,
-                DataStore.logLevel > 0,
+                DataStore.logLevel > 0 || BuildConfig.DEBUG,
                 nativeInterface, nativeInterface, LocalResolverImpl
             )
 

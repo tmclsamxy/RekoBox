@@ -224,7 +224,7 @@ fun buildConfig(
         }
 
         log = LogOptions().apply {
-            level = when (DataStore.logLevel) {
+            level = when (if (BuildConfig.DEBUG && DataStore.logLevel == 0) 3 else DataStore.logLevel) {
                 0 -> "panic"
                 1 -> "warn"
                 2 -> "info"
@@ -1051,8 +1051,15 @@ fun buildConfig(
     }.let {
         val configMap = it.asMap()
         Util.mergeJSON(configMap, proxy.requireBean().customConfigJson)
+        val configJson = gson.toJson(configMap)
+        if (BuildConfig.DEBUG) {
+            // 排查用：把最终下发给内核的配置落盘一份（debug 构建才写）
+            runCatching {
+                java.io.File(SagerNet.application.cacheDir, "last_config.json").writeText(configJson)
+            }
+        }
         ConfigBuildResult(
-            gson.toJson(configMap),
+            configJson,
             externalIndexMap,
             proxy.id,
             trafficMap,

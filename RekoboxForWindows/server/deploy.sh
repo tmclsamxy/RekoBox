@@ -335,13 +335,23 @@ if [ "$CREATE_ACCOUNT" = 1 ] && [ "${#PASSWORD}" -lt 6 ]; then
   die "口令至少 6 位"
 fi
 
+# 显式建组：useradd -r 在部分发行版不会自动创建同名私有组，
+# 而 systemd 单元的 Group=rekosync 找不到组会直接启动失败
+if ! getent group rekosync >/dev/null 2>&1; then
+  if command -v groupadd >/dev/null 2>&1; then
+    groupadd -r rekosync || warn "创建组 rekosync 失败"
+  else
+    addgroup -S rekosync 2>/dev/null || warn "创建组 rekosync 失败"
+  fi
+fi
+
 if ! id -u rekosync >/dev/null 2>&1; then
   if command -v useradd >/dev/null 2>&1; then
-    useradd -r -s /usr/sbin/nologin rekosync
+    useradd -r -g rekosync -s /usr/sbin/nologin rekosync
   else
-    adduser -S -D -H -s /sbin/nologin rekosync
+    adduser -S -D -H -G rekosync -s /sbin/nologin rekosync
   fi
-  note "已创建系统用户 rekosync"
+  note "已创建系统用户 rekosync（组 rekosync）"
 fi
 
 mkdir -p "$INSTALL_DIR/data"

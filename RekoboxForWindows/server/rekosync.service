@@ -1,0 +1,27 @@
+[Unit]
+Description=RekoBox node sync server (rekosync)
+Documentation=https://github.com/tmclsamxy/RekoBox
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=rekosync
+Group=rekosync
+WorkingDirectory=/opt/rekosync
+ExecStart=/opt/rekosync/rekosync -addr :8080 -data /opt/rekosync/data
+Restart=always
+RestartSec=3
+# 日志走 journald，单行一个请求
+StandardOutput=journal
+StandardError=journal
+# 收敛权限：只允许写自己的数据目录
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/rekosync/data
+LimitNOFILE=4096
+
+[Install]
+WantedBy=multi-user.target

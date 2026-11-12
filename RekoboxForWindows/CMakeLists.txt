@@ -165,6 +165,16 @@ set(PROJECT_SOURCES
 
         sub/GroupUpdater.cpp
 
+        sync/SyncModel.cpp
+        sync/SyncModel.hpp
+        sync/SyncStore.cpp
+        sync/SyncStore.hpp
+        sync/SyncApi.cpp
+        sync/SyncApi.hpp
+        sync/SyncEngine.cpp
+        sync/SyncEngine.hpp
+        sync/SyncNotify.hpp
+
         sys/ExternalProcess.cpp
         sys/AutoRun.cpp
 
@@ -232,6 +242,9 @@ set(PROJECT_SOURCES
         ui/dialog_hotkey.cpp
         ui/dialog_hotkey.h
         ui/dialog_hotkey.ui
+
+        ui/dialog_account.cpp
+        ui/dialog_account.h
 
         ui/widget/ProxyItem.cpp
         ui/widget/ProxyItem.h

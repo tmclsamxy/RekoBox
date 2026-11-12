@@ -27,6 +27,10 @@ namespace NekoGui {
     public:
         QString type;
 
+        // 跨设备稳定标识（UUID）。本地 int id 会在不同设备间撞车、也会被 -flag_reorder 重排，
+        // 所以云端同步必须以它为准。老数据首次同步时现场生成。
+        QString sync_id;
+
         int id = -1;
         int gid = 0;
         int latency = 0;

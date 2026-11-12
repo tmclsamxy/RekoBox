@@ -7,6 +7,8 @@ namespace NekoGui {
     class Group : public JsonStore {
     public:
         int id = -1;
+        // 跨设备稳定标识（UUID），含义同 ProxyEntity::sync_id
+        QString sync_id;
         bool archive = false;
         bool skip_auto_update = false;
         QString name = "";

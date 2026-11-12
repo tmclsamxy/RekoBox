@@ -1,6 +1,7 @@
 #include "Database.hpp"
 
 #include "fmt/includes.h"
+#include "sync/SyncNotify.hpp"
 
 #include <QFile>
 #include <QDir>
@@ -217,6 +218,7 @@ namespace NekoGui {
         if (type_ != nullptr) this->type = type_;
 
         _add(new configItem("type", &type, itemType::string));
+        _add(new configItem("sync_id", &sync_id, itemType::string));
         _add(new configItem("id", &id, itemType::integer));
         _add(new configItem("gid", &gid, itemType::integer));
         _add(new configItem("yc", &latency, itemType::integer));
@@ -229,6 +231,11 @@ namespace NekoGui {
             _add(new configItem("bean", dynamic_cast<JsonStore *>(bean), itemType::jsonStore));
             _add(new configItem("traffic", dynamic_cast<JsonStore *>(traffic_data.get()), itemType::jsonStore));
         }
+
+        // 落盘成功且内容真的变了 → 通知同步模块（未登录时它自己会忽略）
+        callback_after_save = [](bool changed) {
+            if (changed) NekoGui_sync::NotifyLocalChange();
+        };
     };
 
     QString ProxyEntity::DisplayLatency() const {
@@ -313,6 +320,7 @@ namespace NekoGui {
 
     Group::Group() {
         _add(new configItem("id", &id, itemType::integer));
+        _add(new configItem("sync_id", &sync_id, itemType::string));
         _add(new configItem("front_proxy_id", &front_proxy_id, itemType::integer));
         _add(new configItem("archive", &archive, itemType::boolean));
         _add(new configItem("skip_auto_update", &skip_auto_update, itemType::boolean));
@@ -323,6 +331,10 @@ namespace NekoGui {
         _add(new configItem("lastup", &sub_last_update, itemType::integer64));
         _add(new configItem("manually_column_width", &manually_column_width, itemType::boolean));
         _add(new configItem("column_width", &column_width, itemType::integerList));
+
+        callback_after_save = [](bool changed) {
+            if (changed) NekoGui_sync::NotifyLocalChange();
+        };
     }
 
     std::shared_ptr<Group> ProfileManager::LoadGroup(const QString &jsonPath) {

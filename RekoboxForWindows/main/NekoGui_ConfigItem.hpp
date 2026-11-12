@@ -32,6 +32,8 @@ namespace NekoGui_ConfigItem {
 
         std::function<void()> callback_after_load = nullptr;
         std::function<void()> callback_before_save = nullptr;
+        // 保存完成回调，参数 = 内容是否真的变了。同步模块靠它感知本地改动。
+        std::function<void(bool)> callback_after_save = nullptr;
 
         QString fn;
         bool load_control_must = false; // must load from file

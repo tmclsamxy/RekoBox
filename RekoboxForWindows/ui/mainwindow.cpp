@@ -17,6 +17,8 @@
 #include "ui/dialog_manage_routes.h"
 #include "ui/dialog_vpn_settings.h"
 #include "ui/dialog_hotkey.h"
+#include "ui/dialog_account.h"
+#include "sync/SyncEngine.hpp"
 
 #include "3rdparty/fix_old_qt.h"
 #include "3rdparty/qrcodegen.hpp"
@@ -440,6 +442,9 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
     connect(TM_auto_update_subsctiption, &QTimer::timeout, this, [&] { UI_update_all_groups(true); });
     TM_auto_update_subsctiption_Reset_Minute(NekoGui::dataStore->sub_auto_update);
 
+    // 云端同步：登录状态下启动 3 秒后拉一次，之后本地改动自动推送
+    NekoGui_sync::SyncEngine::instance()->init();
+
     if (!NekoGui::dataStore->flag_tray) show();
 
     // 兜底：任何退出路径（包括直接 qApp->quit()）都要确保内核进程结束，
@@ -588,6 +593,12 @@ void MainWindow::dialog_message_impl(const QString &sender, const QString &info)
         if (info.startsWith("refresh")) {
             this->refresh_groups();
         }
+    } else if (sender == "SyncEngine") {
+        // 云端数据合并进本地：分组可能新增/重命名，节点可能增删
+        if (info.startsWith("refresh")) {
+            this->refresh_groups();
+            this->refresh_proxy_list();
+        }
     } else if (sender == "SubUpdater") {
         if (info.startsWith("finish")) {
             refresh_proxy_list();
@@ -642,6 +653,10 @@ void MainWindow::on_menu_hotkey_settings_triggered() {
     USE_DIALOG(DialogHotkey)
 }
 
+void MainWindow::on_menu_account_triggered() {
+    USE_DIALOG(DialogAccount)
+}
+
 void MainWindow::on_commitDataRequest() {
     qDebug() << "Start of data save";
     //
@@ -662,6 +677,8 @@ void MainWindow::on_commitDataRequest() {
     //
     NekoGui::dataStore->Save();
     NekoGui::profileManager->SaveManager();
+    // 退出前把同步状态（令牌、pending、指纹）落盘，下次启动继续补推
+    NekoGui_sync::SyncEngine::instance()->persistState();
     qDebug() << "End of data save";
 }
 

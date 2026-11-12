@@ -195,6 +195,8 @@ namespace NekoGui_ConfigItem {
         file.write(save_content);
         file.close();
 
+        if (callback_after_save != nullptr) callback_after_save(changed);
+
         return changed;
     }
 

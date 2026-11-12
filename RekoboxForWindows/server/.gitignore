@@ -1,0 +1,7 @@
+# 编译产物与运行数据不入库
+rekosync
+rekosync.exe
+dist/
+data/
+testdata/
+*.log

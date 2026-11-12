@@ -133,7 +133,29 @@ rekobox_core.exe check -c cfg.json # 旧版 DNS 写法（servers[].address + det
 rekobox_core.exe --disable-color run -c cfg.json   # mixed 入站正常 LISTENING，日志无重复行
 ```
 
-## 5. 已知限制
+## 5. 账号与云端同步（可选）
+
+登录后把分组与节点同步到自建服务器，多设备保持一致；不登录照常本地使用。
+完整设计见 [`../docs/04-account-sync.md`](../docs/04-account-sync.md)。
+
+| 位置 | 内容 |
+|---|---|
+| `sync/` | 客户端同步层：`SyncModel` 合并算法 / `SyncStore` 本地状态 / `SyncApi` HTTP / `SyncEngine` 状态机 |
+| `server/` | 服务端 `rekosync`（Go 标准库，单文件，无数据库），含 systemd unit |
+| `ui/dialog_account.*` | 首选项 →「账号与同步」对话框 |
+| `libs/build_linux_sync.sh` | 交叉编译 Linux 服务端 |
+
+要点：
+
+- 账号**不开放注册**，由服务器管理员 `rekosync -adduser <name>` 创建。
+- 令牌**永久有效**（`expires_at=0`），只有主动注销、服务端改口令或删号才失效。
+- 同步以 UUID（实体 `sync_id`）为条目标识，删除用墓碑，
+  冲突按条目 mtime 做 last-write-wins，服务端只用 `version` 做乐观锁（409 → 重新合并）。
+- 断网时全部改动落本地（`config/sync/state.json` 的 `pending`），
+  联网后按 5s→10s→…→5min 退避自动补推。
+- 默认**不走代理**同步（服务端通常在境内）；需要时可在对话框勾选「经本地代理同步」。
+
+## 6. 已知限制
 
 - **TUN 需管理员**：Wintun 建虚拟网卡 + 改路由表，UAC 弹出必须允许。`wintun.dll` 已随包提供。
 - **未做代码签名**：首次运行会触发 SmartScreen 提示。
@@ -141,7 +163,7 @@ rekobox_core.exe --disable-color run -c cfg.json   # mixed 入站正常 LISTENIN
   与本地 MinGW 流程不一致；发版前建议改成 MinGW 矩阵。
 - 仅构建 `amd64`，未做 `arm64`。
 
-## 6. 排错
+## 7. 排错
 
 | 现象 | 原因 | 处理 |
 |---|---|---|

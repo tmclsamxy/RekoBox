@@ -473,6 +473,7 @@
      <string>首选项</string>
     </property>
     <addaction name="menu_manage_groups"/>
+    <addaction name="menu_account"/>
     <addaction name="menu_basic_settings"/>
     <addaction name="menu_routing_settings"/>
     <addaction name="menu_vpn_settings"/>
@@ -553,6 +554,11 @@
   <action name="menu_basic_settings">
    <property name="text">
     <string>基本设置</string>
+   </property>
+  </action>
+  <action name="menu_account">
+   <property name="text">
+    <string>账号与同步</string>
    </property>
   </action>
   <action name="menu_add_from_input">

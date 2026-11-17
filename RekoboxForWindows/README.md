@@ -135,29 +135,32 @@ rekobox_core.exe check -c cfg.json # 旧版 DNS 写法（servers[].address + det
 rekobox_core.exe --disable-color run -c cfg.json   # mixed 入站正常 LISTENING，日志无重复行
 ```
 
-## 5. 账号与云端同步（可选）
+## 5. 账号与节点订阅（可选）
 
-登录后把分组与节点同步到自建服务器，多设备保持一致；不登录照常本地使用。
-完整设计见 [`../docs/04-account-sync.md`](../docs/04-account-sync.md)。
+管理员在服务端网页控制台维护一份共享节点池，客户端登录后**只读**拉取；
+不登录照常本地使用。完整设计见 [`../docs/04-account-sync.md`](../docs/04-account-sync.md)。
 
 | 位置 | 内容 |
 |---|---|
-| `sync/` | 客户端同步层：`SyncModel` 合并算法 / `SyncStore` 本地状态 / `SyncApi` HTTP / `SyncEngine` 状态机 |
-| `server/` | 服务端 `rekosync`（Go 标准库，单文件，无数据库），含 systemd unit |
-| `server/deploy.sh` | **服务器上**一键安装：装依赖与 Go → 拉源码 → 编译 → systemd → 建号 → 自检 |
+| `sync/` | 客户端订阅层：`SyncStore` 本地状态 / `SyncApi` HTTP / `SyncEngine` 拉取状态机 / `SyncModel` 工具函数 |
+| `server/` | 服务端 `rekosync`（Go 标准库，单文件，无数据库），含 systemd unit 与网页控制台 |
+| `server/web/admin.html` | 管理页面：节点增删改查、排序启停、账号管理（内嵌进二进制） |
+| `server/deploy.sh` | **服务器上**一键安装：装依赖与 Go → 拉源码 → 编译 → systemd → 建管理员 → 自检 |
 | `server/deploy-remote.sh` | **开发机上**远程部署：交叉编译后上传，或交给服务器自行编译 |
-| `ui/dialog_account.*` | 首选项 →「账号与同步」对话框 |
+| `ui/dialog_account.*` | 首选项 →「账号与节点订阅」对话框 |
 | `libs/build_linux_sync.sh` | 交叉编译 Linux 服务端（远程部署与 release 用） |
 
 要点：
 
-- 账号**不开放注册**，由服务器管理员 `rekosync -adduser <name>` 创建。
-- 令牌**永久有效**（`expires_at=0`），只有主动注销、服务端改口令或删号才失效。
-- 同步以 UUID（实体 `sync_id`）为条目标识，删除用墓碑，
-  冲突按条目 mtime 做 last-write-wins，服务端只用 `version` 做乐观锁（409 → 重新合并）。
-- 断网时全部改动落本地（`config/sync/state.json` 的 `pending`），
-  联网后按 5s→10s→…→5min 退避自动补推。
-- 默认**不走代理**同步（服务端通常在境内）；需要时可在对话框勾选「经本地代理同步」。
+- 账号**不开放注册**，由服务器管理员用 `-addadmin` / `-adduser` 创建，或在控制台里建。
+- 权限分两级：`admin` 可进 `/admin` 管理节点与账号；`user` 只能登录客户端拉节点。
+- **客户端没有上传接口**：`GET /api/v1/nodes` 是唯一数据入口，旧的 `PUT /api/v1/vault` 固定 403，
+  所以任何一个用户都改不到别人的节点。
+- 拉取以 `sync_id = "srv:<节点id>"` 对齐本地实体，反复拉取不会产生重复；
+  服务端改链接才覆盖本地，删除/禁用会连带删掉本地那条（正在运行则延后）。
+- 触发：登录后、启动 3 秒、每 30 分钟（可调关）、手动「立即拉取」。
+- 断网进入 `Offline`，按 5s→10s→…→5min 退避重试；令牌失效（401）自动退回本地模式。
+- 默认**不走代理**拉取（服务端通常在境内）；需要时可在对话框勾选「经本地代理拉取」。
 
 ## 6. 已知限制
 

@@ -1,5 +1,6 @@
 #include "SyncEngine.hpp"
 
+#include <QCryptographicHash>
 #include <QDateTime>
 #include <QJsonArray>
 #include <QSet>
@@ -8,7 +9,14 @@
 
 #include "db/Database.hpp"
 #include "db/ProxyEntity.hpp"
+#include "fmt/includes.h"
 #include "main/NekoGui.hpp"
+#include "sync/SyncModel.hpp"
+
+// GroupUpdater.cpp 里的收尾修正（security 取值归一化），直接复用已有实现
+namespace NekoGui_sub {
+    void RawUpdater_FixEnt(const std::shared_ptr<NekoGui::ProxyEntity> &ent);
+}
 
 namespace NekoGui_sync {
 
@@ -43,7 +51,54 @@ namespace NekoGui_sync {
             return s;
         }
 
-        constexpr qint64 kTombstoneTtlMs = 30LL * 24 * 3600 * 1000; // 墓碑保留 30 天
+        QString LinkHash(const QString &link) {
+            return QString::fromLatin1(
+                QCryptographicHash::hash(link.toUtf8(), QCryptographicHash::Sha1).toHex());
+        }
+
+        // 分享链接 -> 实体。只处理客户端能导入的协议，其余返回 nullptr。
+        // 与服务端 server/nodes.go 的放行清单保持一致。
+        std::shared_ptr<NekoGui::ProxyEntity> ProfileFromLink(const QString &link) {
+            std::shared_ptr<NekoGui::ProxyEntity> ent;
+            const auto ok = [&ent](bool parsed) { return parsed && ent && ent->bean; };
+
+            if (link.startsWith("socks5://") || link.startsWith("socks4://") ||
+                link.startsWith("socks4a://") || link.startsWith("socks://")) {
+                ent = NekoGui::ProfileManager::NewProxyEntity("socks");
+                if (!ok(ent->SocksHTTPBean()->TryParseLink(link))) return nullptr;
+            } else if (link.startsWith("http://") || link.startsWith("https://")) {
+                ent = NekoGui::ProfileManager::NewProxyEntity("http");
+                if (!ok(ent->SocksHTTPBean()->TryParseLink(link))) return nullptr;
+            } else if (link.startsWith("ss://")) {
+                ent = NekoGui::ProfileManager::NewProxyEntity("shadowsocks");
+                if (!ok(ent->ShadowSocksBean()->TryParseLink(link))) return nullptr;
+            } else if (link.startsWith("vmess://")) {
+                ent = NekoGui::ProfileManager::NewProxyEntity("vmess");
+                if (!ok(ent->VMessBean()->TryParseLink(link))) return nullptr;
+            } else if (link.startsWith("vless://")) {
+                ent = NekoGui::ProfileManager::NewProxyEntity("vless");
+                if (!ok(ent->TrojanVLESSBean()->TryParseLink(link))) return nullptr;
+            } else if (link.startsWith("trojan://")) {
+                ent = NekoGui::ProfileManager::NewProxyEntity("trojan");
+                if (!ok(ent->TrojanVLESSBean()->TryParseLink(link))) return nullptr;
+            } else if (link.startsWith("naive+")) {
+                ent = NekoGui::ProfileManager::NewProxyEntity("naive");
+                if (!ok(ent->NaiveBean()->TryParseLink(link))) return nullptr;
+            } else if (link.startsWith("hysteria2://") || link.startsWith("hy2://")) {
+                ent = NekoGui::ProfileManager::NewProxyEntity("hysteria2");
+                if (!ok(ent->QUICBean()->TryParseLink(link))) return nullptr;
+            } else if (link.startsWith("tuic://")) {
+                ent = NekoGui::ProfileManager::NewProxyEntity("tuic");
+                if (!ok(ent->QUICBean()->TryParseLink(link))) return nullptr;
+            } else {
+                return nullptr;
+            }
+
+            NekoGui_sub::RawUpdater_FixEnt(ent);
+            return ent;
+        }
+
+        QString DefaultGroupName() { return QObject::tr("云端节点"); }
     } // namespace
 
     SyncEngine *SyncEngine::instance() {
@@ -54,15 +109,14 @@ namespace NekoGui_sync {
     SyncEngine::SyncEngine(QObject *parent) : QObject(parent) {
         api = new SyncApi(this);
 
-        debounce.setSingleShot(true);
-        debounce.setInterval(5000); // 连续编辑合并成一次推送
-        connect(&debounce, &QTimer::timeout, this, [this] {
-            if (state.autoSync && state.loggedIn() && !syncing_) syncNow("local-change");
-        });
-
         retryTimer.setSingleShot(true);
         connect(&retryTimer, &QTimer::timeout, this, [this] {
-            if (state.loggedIn() && !syncing_) syncNow("retry");
+            if (state.loggedIn() && !pulling_) syncNow("retry");
+        });
+
+        pullTimer.setSingleShot(false);
+        connect(&pullTimer, &QTimer::timeout, this, [this] {
+            if (state.loggedIn() && !pulling_) syncNow("timer");
         });
     }
 
@@ -77,6 +131,7 @@ namespace NekoGui_sync {
         state.saveState();
 
         setState(state.loggedIn() ? State::Idle : State::LoggedOut);
+        restartTimer();
 
         // 启动 3 秒后拉一次：等主窗口把节点列表铺好，避免刷新时机太早
         QTimer::singleShot(3000, this, [this] {
@@ -86,30 +141,39 @@ namespace NekoGui_sync {
 
     void SyncEngine::persistState() {
         state.saveState();
-        state.saveMeta();
+        state.saveNodes();
+    }
+
+    void SyncEngine::restartTimer() {
+        pullTimer.stop();
+        if (!state.loggedIn() || !state.autoPull) return;
+        auto minutes = state.pullIntervalMin;
+        if (minutes < 1) minutes = 30;
+        pullTimer.start(minutes * 60 * 1000);
     }
 
     QString SyncEngine::statusText() const {
         switch (current) {
             case State::LoggedOut:
                 return QObject::tr("未登录（仅本地使用）");
-            case State::Syncing:
-                return QObject::tr("正在同步…");
+            case State::Pulling:
+                return QObject::tr("正在拉取节点…");
             case State::Offline:
                 return QObject::tr("离线，稍后自动重试：%1").arg(state.lastError);
             case State::Error:
-                return QObject::tr("同步失败：%1").arg(state.lastError);
+                return QObject::tr("拉取失败：%1").arg(state.lastError);
             case State::Idle:
                 break;
         }
         QString s;
         if (state.lastSyncAt <= 0) {
-            s = QObject::tr("已登录，尚未同步");
+            s = QObject::tr("已登录，尚未拉取");
         } else {
-            s = QObject::tr("上次同步：%1")
-                    .arg(QDateTime::fromMSecsSinceEpoch(state.lastSyncAt).toString("MM-dd HH:mm:ss"));
+            s = QObject::tr("上次拉取：%1 · %2 个节点")
+                    .arg(QDateTime::fromMSecsSinceEpoch(state.lastSyncAt).toString("MM-dd HH:mm:ss"))
+                    .arg(state.lastCount);
         }
-        if (state.pending) s += QObject::tr("（有本地改动待上传）");
+        s += QObject::tr("（只读，客户端不能上传）");
         return s;
     }
 
@@ -140,8 +204,8 @@ namespace NekoGui_sync {
             emit loginFinished(false, QObject::tr("请填写用户名与口令"));
             return;
         }
-        if (syncing_) {
-            emit loginFinished(false, QObject::tr("正在同步，请稍候再登录"));
+        if (pulling_) {
+            emit loginFinished(false, QObject::tr("正在拉取节点，请稍候再登录"));
             return;
         }
 
@@ -165,17 +229,19 @@ namespace NekoGui_sync {
                 return;
             }
             if (state.username != user) {
-                // 换了账号：旧账号的基线必须清掉，否则会把 A 的删除动作带到 B
-                state.items.clear();
-                state.tombstones.clear();
+                // 换了账号：旧的落地记录不能留，否则会把 A 的节点当成 B 的
+                state.nodes.clear();
                 state.lastVersion = 0;
                 state.lastSyncAt = 0;
+                state.lastCount = 0;
             }
             state.username = user;
             state.token = token;
+            state.role = r.body.value("user").toObject().value("role").toString();
             state.lastError.clear();
-            state.pending = false;
             state.saveState();
+            state.saveNodes();
+            restartTimer();
             emit loginFinished(true, QObject::tr("登录成功"));
             emit stateChanged();
             syncNow("login");
@@ -192,102 +258,226 @@ namespace NekoGui_sync {
         // 服务端连不上也要本地注销：令牌留在服务端不影响本机继续用
         api->post("/api/v1/auth/logout", {}, [this](const ApiResult &) {
             state.clearSession();
+            pullTimer.stop();
             setState(State::LoggedOut);
-            emit syncFinished(true, QObject::tr("已注销，本地数据保留"));
+            emit syncFinished(true, QObject::tr("已注销，本地已有节点保留"));
         });
     }
 
     void SyncEngine::noteLocalChange() {
-        if (applying_) return; // 应用远端数据引发的保存不算本地改动
-        if (!state.loggedIn()) return;
-        if (!state.pending) {
-            state.pending = true;
-            state.saveState();
-            emit stateChanged();
-        }
-        if (state.autoSync) debounce.start();
+        // 只读模式：本地改动不需要上传。这里刻意留空，
+        // 调用点（实体/分组 Save 回调）保持不动，将来要加"仅上传备注"再说。
     }
 
-    // ---- 同步主流程 ----
+    // ---- 拉取主流程 ----
 
     void SyncEngine::syncNow(const QString &reason) {
         if (!state.loggedIn()) {
             setState(State::LoggedOut);
             return;
         }
-        if (syncing_) {
+        if (pulling_) {
             queued_ = true;
             return;
         }
-        syncing_ = true;
+        pulling_ = true;
         retryTimer.stop();
-        setState(State::Syncing);
-        qDebug() << "[sync] start:" << reason;
-        runRound(0);
+        setState(State::Pulling);
+        qDebug() << "[sync] pull start:" << reason;
+        runPull(0);
     }
 
-    void SyncEngine::runRound(int attempt) {
+    void SyncEngine::runPull(int attempt) {
         prepareApi();
-        // 先扫本地：更新指纹、生成墓碑、算出每个条目的 mtime
-        const auto local = buildLocalVault();
+        auto path = QStringLiteral("/api/v1/nodes");
+        if (state.lastVersion > 0) path += QStringLiteral("?version=%1").arg(state.lastVersion);
 
-        api->get("/api/v1/vault", [this, attempt, local](const ApiResult &r) {
+        api->get(path, [this, attempt](const ApiResult &r) {
             if (!r.ok()) {
                 finishFail(r);
                 return;
             }
-
-            Vault remote;
-            qint64 baseVersion = 0;
-            if (r.status == 200) {
-                baseVersion = static_cast<qint64>(r.body.value("version").toDouble());
-                remote = VaultFromJson(r.body.value("payload").toObject());
-            }
-
-            int conflicts = 0;
-            const auto merged = MergeVault(local, remote, &conflicts);
-            applyVault(merged);
-
-            // 本地已经和远端一致（比如只是打开看了一眼）：不必制造新版本
-            if (VaultEquals(merged, remote)) {
-                finishOk(conflicts, false);
+            if (r.body.value("unchanged").toBool()) {
+                finishOk(PullStats{}, true);
                 return;
             }
-
-            QJsonObject putBody;
-            putBody.insert("base_version", static_cast<double>(baseVersion));
-            putBody.insert("device", state.deviceName);
-            putBody.insert("payload", VaultToJson(merged));
-
-            api->put("/api/v1/vault", putBody, [this, attempt, conflicts](const ApiResult &pr) {
-                if (pr.ok()) {
-                    state.lastVersion = static_cast<qint64>(pr.body.value("version").toDouble());
-                    finishOk(conflicts, true);
-                    return;
-                }
-                if (pr.status == 409 && attempt < 3) {
-                    // 另一台设备先写了：重新拉取、重新合并，最多 3 轮
-                    qDebug() << "[sync] version conflict, retry round" << attempt + 1;
-                    runRound(attempt + 1);
-                    return;
-                }
-                finishFail(pr);
-            });
+            const auto version = static_cast<qint64>(r.body.value("version").toDouble());
+            const auto nodes = r.body.value("nodes").toArray();
+            const auto stats = applyNodes(version, nodes);
+            finishOk(stats, false);
         });
     }
 
-    void SyncEngine::finishOk(int conflicts, bool pushed) {
-        syncing_ = false;
+    PullStats SyncEngine::applyNodes(qint64 version, const QJsonArray &nodes) {
+        applying_ = true;
+        PullStats st;
+        auto *pm = NekoGui::profileManager;
+        QSet<QString> alive;
+        QHash<int, QList<int>> orderByGroup;
+
+        for (const auto &v: nodes) {
+            const auto o = v.toObject();
+            const auto id = o.value("id").toString().trimmed();
+            const auto link = o.value("link").toString().trimmed();
+            if (id.isEmpty() || link.isEmpty()) {
+                st.skipped++;
+                continue;
+            }
+            alive.insert(id);
+
+            const auto syncId = QStringLiteral("srv:") + id;
+            const auto hash = LinkHash(link);
+            const auto gid = ensureGroup(o.value("group").toString());
+
+            auto ent = FindProfileBySync(syncId);
+            const auto ref = state.nodes.value(id);
+            const bool known = !ref.syncId.isEmpty();
+
+            if (ent && known && ref.linkHash == hash) {
+                // 链接没变：保持本地现状（用户的改名、调参不会被覆盖）
+                orderByGroup[gid].append(ent->id);
+                continue;
+            }
+
+            auto fresh = ProfileFromLink(link);
+            if (!fresh) {
+                st.skipped++;
+                qDebug() << "[sync] 跳过无法解析的节点:" << o.value("name").toString() << link.left(48);
+                continue;
+            }
+
+            if (ent == nullptr) {
+                fresh->sync_id = syncId;
+                if (!pm->AddProfile(fresh, gid)) {
+                    st.skipped++;
+                    continue;
+                }
+                st.created++;
+                orderByGroup[gid].append(fresh->id);
+            } else if (ent->type != fresh->type) {
+                // 管理员把协议换了（比如 tuic → vless）：旧的 bean 类型不兼容，重建一条
+                const int oldId = ent->id;
+                if (NekoGui::dataStore->started_id == oldId) {
+                    st.skipped++; // 正在跑：这一轮先不动，停止后再换
+                    orderByGroup[gid].append(oldId);
+                    continue;
+                }
+                pm->DeleteProfile(oldId);
+                fresh->sync_id = syncId;
+                if (!pm->AddProfile(fresh, gid)) {
+                    st.skipped++;
+                    continue;
+                }
+                st.updated++;
+                orderByGroup[gid].append(fresh->id);
+            } else {
+                // 同协议只换 bean 内容：id / gid / 本地统计必须保留，
+                // 否则会把文件里的 id 写成 -1，下次启动整条记录就废了
+                const int keepId = ent->id;
+                ent->FromJson(fresh->ToJson({}));
+                ent->id = keepId;
+                ent->sync_id = syncId;
+                if (ent->gid != gid) {
+                    ent->gid = gid;
+                }
+                ent->Save();
+                st.updated++;
+                orderByGroup[gid].append(keepId);
+            }
+            ServerNodeRef nr;
+            nr.syncId = syncId;
+            nr.linkHash = hash;
+            nr.updatedAt = NowMs();
+            state.nodes.insert(id, nr);
+        }
+
+        // 服务端已删除或已禁用的节点（禁用不会下发）
+        QList<QString> gone;
+        for (auto it = state.nodes.constBegin(); it != state.nodes.constEnd(); ++it) {
+            if (!alive.contains(it.key())) gone.append(it.key());
+        }
+        for (const auto &id: gone) {
+            const auto ref = state.nodes.value(id);
+            auto ent = FindProfileBySync(ref.syncId);
+            if (ent == nullptr) {
+                state.nodes.remove(id);
+                continue;
+            }
+            if (NekoGui::dataStore->started_id == ent->id) {
+                // 正在跑这条节点：等用户停止代理后再删，避免连接被打断
+                if (MW_show_log) {
+                    MW_show_log(QObject::tr("[订阅]「%1」已在服务端移除，停止代理后自动删除")
+                                    .arg(ent->bean->DisplayTypeAndName()));
+                }
+                continue;
+            }
+            pm->DeleteProfile(ent->id);
+            state.nodes.remove(id);
+            st.removed++;
+        }
+
+        // 组内顺序按服务端顺序落一次
+        for (auto it = orderByGroup.constBegin(); it != orderByGroup.constEnd(); ++it) {
+            auto g = pm->GetGroup(it.key());
+            if (g && g->order != it.value()) {
+                g->order = it.value();
+                g->Save();
+            }
+        }
+
+        applying_ = false;
+
+        if (st.changed()) {
+            pm->SaveManager();
+            if (MW_dialog_message) MW_dialog_message("SyncEngine", "refresh");
+        }
+
+        state.lastVersion = version;
+        state.lastCount = nodes.size();
         state.lastSyncAt = NowMs();
-        state.pending = false;
+        state.lastError.clear();
+        state.saveState();
+        state.saveNodes();
+
+        qDebug() << "[sync] applied: created" << st.created << "updated" << st.updated
+                 << "removed" << st.removed << "skipped" << st.skipped;
+        return st;
+    }
+
+    int SyncEngine::ensureGroup(const QString &name) {
+        auto label = name.trimmed();
+        if (label.isEmpty()) label = DefaultGroupName();
+        const auto syncId = QStringLiteral("srvgrp:") + label;
+
+        if (auto existing = FindGroupBySync(syncId)) return existing->id;
+
+        auto group = NekoGui::ProfileManager::NewGroup();
+        group->sync_id = syncId;
+        group->name = label;
+        if (!NekoGui::profileManager->AddGroup(group)) {
+            return NekoGui::dataStore->current_group;
+        }
+        return group->id;
+    }
+
+    void SyncEngine::finishOk(const PullStats &stats, bool unchanged) {
+        pulling_ = false;
         state.lastError.clear();
         state.saveState();
         retryDelayMs = 5000;
         retryTimer.stop();
         setState(State::Idle);
 
-        QString msg = pushed ? QObject::tr("已上传本地改动") : QObject::tr("已是最新");
-        if (conflicts > 0) msg += QObject::tr("，合并 %1 处冲突").arg(conflicts);
+        QString msg;
+        if (unchanged) {
+            msg = QObject::tr("已是最新（%1 个节点）").arg(state.lastCount);
+        } else if (stats.changed()) {
+            msg = QObject::tr("已更新：新增 %1 · 更新 %2 · 删除 %3")
+                      .arg(stats.created).arg(stats.updated).arg(stats.removed);
+            if (stats.skipped > 0) msg += QObject::tr("，%1 条无法解析").arg(stats.skipped);
+        } else {
+            msg = QObject::tr("已是最新（%1 个节点）").arg(state.lastCount);
+        }
         emit syncFinished(true, msg);
         qDebug() << "[sync] done:" << msg;
 
@@ -298,12 +488,13 @@ namespace NekoGui_sync {
     }
 
     void SyncEngine::finishFail(const ApiResult &r) {
-        syncing_ = false;
+        pulling_ = false;
         queued_ = false;
 
         if (r.status == 401) {
-            // 令牌失效（服务端删号 / 改口令）：清会话，退回本地模式，不动本地节点
+            // 令牌失效（服务端删号 / 改口令 / 禁用）：清会话，退回本地模式，不动本地节点
             state.clearSession();
+            pullTimer.stop();
             setState(State::LoggedOut, r.error.isEmpty() ? QObject::tr("登录已失效，请重新登录") : r.error);
             emit syncFinished(false, state.lastError);
             return;
@@ -327,298 +518,6 @@ namespace NekoGui_sync {
         retryTimer.setInterval(retryDelayMs);
         retryTimer.start();
         retryDelayMs = qMin(retryDelayMs * 2, 300000); // 封顶 5 分钟
-    }
-
-    // ---- 本地 -> 报文 ----
-
-    void SyncEngine::stampItem(SyncItem &item, bool firstBaseline) {
-        const auto key = SyncStore::key(item.kind, item.id);
-        const auto hash = ItemHash(item.data);
-        auto it = state.items.find(key);
-        const qint64 now = NowMs();
-
-        if (it == state.items.end()) {
-            // 首次见到的条目。首次建立基线时把 mtime 压到最小，
-            // 让「服务端已有数据」在冲突中优先，避免新登录的机器覆盖云端
-            item.mtime = firstBaseline ? 1 : now;
-            state.items.insert(key, SyncMetaEntry{hash, item.mtime});
-            return;
-        }
-        if (it->hash.isEmpty()) {
-            // 内容刚从远端应用下来：采信当前序列化结果，保留远端 mtime
-            it->hash = hash;
-            item.mtime = it->mtime;
-            return;
-        }
-        if (it->hash != hash) {
-            item.mtime = now;
-            it->hash = hash;
-            it->mtime = now;
-            return;
-        }
-        item.mtime = it->mtime;
-    }
-
-    Vault SyncEngine::buildLocalVault() {
-        Vault vault;
-        auto *pm = NekoGui::profileManager;
-        const bool firstBaseline = state.items.isEmpty() && state.tombstones.isEmpty();
-
-        // 全新设备判定：首次建基线、没有任何节点、只有一个空的默认分组。
-        // 这种分组只是安装时自动建的占位，不该被当成"本地数据"推到云端——
-        // 否则每台新机器都会在云端多一个「默认」分组。
-        if (firstBaseline && pm->profiles.empty() && pm->groups.size() == 1) {
-            const auto &only = pm->groups.begin()->second;
-            if (only && only->url.trimmed().isEmpty() && only->Profiles().isEmpty()) {
-                adoptRemoteGroupId = only->id;
-            }
-        }
-
-        // 1) 老数据没有 sync_id：现场生成并落盘，之后一直跟着这条记录
-        for (auto &[gid, group]: pm->groups) {
-            if (group && group->sync_id.isEmpty()) {
-                group->sync_id = NewSyncId();
-                group->Save();
-            }
-        }
-        for (auto &[pid, ent]: pm->profiles) {
-            if (ent && ent->sync_id.isEmpty()) {
-                ent->sync_id = NewSyncId();
-                ent->Save();
-            }
-        }
-
-        // 2) 分组（id/order 是机器本地字段，导出时换成 UUID 列表）
-        QHash<int, QString> groupSyncOf;
-        for (auto &[gid, group]: pm->groups) {
-            if (!group) continue;
-            groupSyncOf.insert(gid, group->sync_id);
-
-            // 全新设备的占位分组不参与同步
-            if (adoptRemoteGroupId == gid) continue;
-
-            SyncItem item;
-            item.kind = "group";
-            item.id = group->sync_id;
-            item.data = group->ToJson({"id", "order", "sync_id"});
-            QJsonArray orderIds;
-            for (const auto &ent: group->ProfilesWithOrder()) {
-                if (ent && !ent->sync_id.isEmpty()) orderIds.append(ent->sync_id);
-            }
-            item.data.insert("order_ids", orderIds);
-            stampItem(item, firstBaseline);
-            vault.groups.append(item);
-        }
-
-        // 3) 节点（延迟、测试报告、流量统计属于本机状态，不参与同步）
-        for (auto &[pid, ent]: pm->profiles) {
-            if (!ent) continue;
-            SyncItem item;
-            item.kind = "profile";
-            item.id = ent->sync_id;
-            item.groupId = groupSyncOf.value(ent->gid);
-            item.data = ent->ToJson({"id", "gid", "yc", "report", "traffic", "sync_id"});
-            stampItem(item, firstBaseline);
-            vault.profiles.append(item);
-        }
-
-        // 4) 上次同步过、这次本地没了的条目 = 用户删掉了 → 生成墓碑
-        QSet<QString> seen;
-        for (const auto &g: vault.groups) seen.insert(SyncStore::key(g.kind, g.id));
-        for (const auto &p: vault.profiles) seen.insert(SyncStore::key(p.kind, p.id));
-
-        QList<QString> vanished;
-        for (auto it = state.items.constBegin(); it != state.items.constEnd(); ++it) {
-            if (!seen.contains(it.key())) vanished.append(it.key());
-        }
-        for (const auto &key: vanished) {
-            const auto sep = key.indexOf(':');
-            if (sep <= 0) continue;
-            SyncTombstone t;
-            t.kind = key.left(sep);
-            t.id = key.mid(sep + 1);
-            t.mtime = NowMs();
-            state.tombstones.append(t);
-            state.items.remove(key);
-            qDebug() << "[sync] tombstone" << t.kind << t.id;
-        }
-
-        // 5) 过期墓碑清掉，避免无限增长
-        const qint64 cutoff = NowMs() - kTombstoneTtlMs;
-        for (int i = 0; i < state.tombstones.size();) {
-            if (state.tombstones[i].mtime < cutoff) {
-                state.tombstones.removeAt(i);
-            } else {
-                i++;
-            }
-        }
-        for (const auto &t: state.tombstones) {
-            SyncItem item;
-            item.kind = t.kind;
-            item.id = t.id;
-            item.mtime = t.mtime;
-            item.deleted = true;
-            if (t.kind == "group") {
-                vault.groups.append(item);
-            } else {
-                vault.profiles.append(item);
-            }
-        }
-
-        state.saveMeta();
-        return vault;
-    }
-
-    // ---- 报文 -> 本地 ----
-
-    void SyncEngine::recordApplied(const SyncItem &item) {
-        // hash 留空：下次扫描按实体真实序列化结果补全，避免字段补全导致「假改动」
-        state.items.insert(SyncStore::key(item.kind, item.id), SyncMetaEntry{QString(), item.mtime});
-    }
-
-    void SyncEngine::applyVault(const Vault &vault) {
-        applying_ = true;
-        auto *pm = NekoGui::profileManager;
-        bool changed = false;
-
-        // 1) 分组先建出来，节点才知道自己该落在哪个分组
-        QHash<QString, int> gidOf;
-        for (const auto &g: vault.groups) {
-            if (g.deleted) continue;
-            auto local = FindGroupBySync(g.id);
-            if (local == nullptr) {
-                local = NekoGui::ProfileManager::NewGroup();
-                local->sync_id = g.id;
-                local->name = g.data.value("name").toString(QObject::tr("同步分组"));
-                if (local->name.isEmpty()) local->name = QObject::tr("同步分组");
-                pm->AddGroup(local);
-                changed = true;
-            }
-            local->FromJson(g.data);
-            local->sync_id = g.id;
-            if (local->name.isEmpty()) local->name = QObject::tr("同步分组");
-            local->Save();
-            gidOf.insert(g.id, local->id);
-            recordApplied(g);
-        }
-
-        // 2) 节点：先删除，再新建/覆盖
-        for (const auto &p: vault.profiles) {
-            auto ent = FindProfileBySync(p.id);
-            if (p.deleted) {
-                if (ent) {
-                    if (NekoGui::dataStore->started_id == ent->id) {
-                        // 正在用的节点不能删：把基线的 mtime 对齐墓碑，
-                        // 这样合并时「同一时刻」由墓碑优先，停止后下一轮即可删掉
-                        state.items.insert(SyncStore::key(p.kind, p.id), SyncMetaEntry{QString(), p.mtime});
-                        if (MW_show_log) {
-                            MW_show_log(QObject::tr("[同步] 节点正在使用，停止后才会删除：%1").arg(ent->bean->DisplayTypeAndName()));
-                        }
-                    } else {
-                        pm->DeleteProfile(ent->id);
-                        state.items.remove(SyncStore::key(p.kind, p.id));
-                        changed = true;
-                    }
-                } else {
-                    state.items.remove(SyncStore::key(p.kind, p.id));
-                }
-                continue;
-            }
-
-            int gid = gidOf.value(p.groupId, -1);
-            if (gid < 0) gid = NekoGui::dataStore->current_group;
-
-            if (ent == nullptr) {
-                ent = NekoGui::ProfileManager::NewProxyEntity(p.data.value("type").toString());
-                if (!ent || !ent->bean) {
-                    qDebug() << "[sync] skip unknown profile type:" << p.data.value("type").toString();
-                    continue;
-                }
-                ent->FromJson(p.data);
-                ent->sync_id = p.id;
-                if (!pm->AddProfile(ent, gid)) continue;
-                changed = true;
-            } else {
-                ent->FromJson(p.data);
-                ent->sync_id = p.id;
-                ent->gid = gid;
-                ent->Save();
-                changed = true;
-            }
-            recordApplied(p);
-        }
-
-        // 3) 分组内排序：等节点都落好本地 id 之后再翻译 order_ids
-        for (const auto &g: vault.groups) {
-            if (g.deleted) continue;
-            auto local = FindGroupBySync(g.id);
-            if (!local) continue;
-            QList<int> order;
-            for (const auto &v: g.data.value("order_ids").toArray()) {
-                auto ent = FindProfileBySync(v.toString());
-                if (ent) order.append(ent->id);
-            }
-            if (local->order != order) {
-                local->order = order;
-                local->Save();
-            }
-        }
-
-        // 4) 删除分组（节点已在上面按墓碑删完，这里只剩空壳）
-        for (const auto &g: vault.groups) {
-            if (!g.deleted) continue;
-            auto local = FindGroupBySync(g.id);
-            if (local && pm->groups.size() > 1) {
-                pm->DeleteGroup(local->id);
-                changed = true;
-                state.items.remove(SyncStore::key(g.kind, g.id));
-            } else if (local) {
-                // 只剩最后一个分组，DeleteGroup 会拒绝：保留基线交给下一轮
-                state.items.insert(SyncStore::key(g.kind, g.id), SyncMetaEntry{QString(), g.mtime});
-            } else {
-                state.items.remove(SyncStore::key(g.kind, g.id));
-            }
-        }
-
-        // 5) 全新设备的占位分组：服务端已有分组就丢掉本地这个空壳
-        if (adoptRemoteGroupId >= 0) {
-            const int gid = adoptRemoteGroupId;
-            adoptRemoteGroupId = -1;
-            auto holder = pm->GetGroup(gid);
-            bool remoteHasGroup = false;
-            for (const auto &g: vault.groups) {
-                if (!g.deleted) {
-                    remoteHasGroup = true;
-                    break;
-                }
-            }
-            if (holder && remoteHasGroup && pm->groups.size() > 1) {
-                const auto sid = holder->sync_id;
-                pm->DeleteGroup(gid);
-                state.items.remove(SyncStore::key("group", sid));
-                changed = true;
-            }
-        }
-
-        // 6) 当前分组被删时的兜底
-        if (pm->GetGroup(NekoGui::dataStore->current_group) == nullptr && !pm->groups.empty()) {
-            NekoGui::dataStore->current_group = pm->groups.begin()->first;
-        }
-
-        // 7) 关键一步：按「刚写入本地后的真实内容」重建指纹。
-        //    recordApplied 只记了 mtime 并把 hash 留空（表示「待采信」），
-        //    这里再扫一遍把 hash 补上——否则指纹永远是空的，
-        //    之后用户的真实改动会被当成「已同步」而永远推不上去。
-        //    此时 applying_ 仍为 true，扫描引发的 Save 不会触发新的同步。
-        buildLocalVault();
-
-        applying_ = false;
-
-        if (changed) {
-            pm->SaveManager();
-            if (MW_dialog_message) MW_dialog_message("SyncEngine", "refresh");
-        }
-        state.saveMeta();
     }
 
     void NotifyLocalChange() {

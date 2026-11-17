@@ -1,397 +1,279 @@
-# 账号与云端同步（Windows 客户端 + 自托管服务端）
+# 账号与节点池（Windows 客户端 + 自托管服务端）
 
-目标：Windows 端登录后自动与自有服务器同步分组与节点配置，多设备保持一致；
-不登录也能正常使用；断网时本地照常读写，恢复后自动补同步。
+目标：
+- 管理员在一张网页上维护**共享节点池**（按分享链接录入，如 `tuic://…`）；
+- 客户端登录后自动拉取，**只读**——没有任何上传通道，用户之间不会互相改坏节点；
+- 不登录也能正常使用本地节点；断网时本地照常读写，恢复后自动补拉。
 
 ```
-┌──────────────────────────┐         HTTP/1.1          ┌──────────────────────────┐
-│ RekoBox Windows (Qt6)    │  Authorization: Bearer …  │ rekosync (Go, 标准库)     │
-│                          │ ────────────────────────► │                          │
-│ sync/SyncEngine          │   GET/PUT /api/v1/vault   │ data/users.json          │
-│   ├ SyncStore  state.json│ ◄──────────────────────── │ data/tokens.json         │
-│   │            meta.json │   version 乐观锁 / 409    │ data/vaults/<user>.json  │
-│   ├ SyncApi    Qt Network│                           │                          │
-│   └ SyncModel  合并算法   │                           └──────────────────────────┘
-└──────────────────────────┘
+┌───────────────────────────┐   浏览器    ┌───────────────────────────┐
+│ 管理员                    │ ─────────► │ rekosync (Go, 标准库)      │
+│  http://host:8080/admin   │  Bearer    │                           │
+└───────────────────────────┘            │ data/users.json           │
+                                         │ data/tokens.json          │
+┌───────────────────────────┐            │ data/nodes.json  ← 节点池  │
+│ RekoBox Windows (Qt6)     │  GET only  │                           │
+│  sync/SyncEngine          │ ─────────► │ 没有客户端写接口           │
+│   ├ SyncStore  state.json │ ◄───────── │ PUT /vault 固定 403        │
+│   └ SyncApi    Qt Network │  节点数组   │                           │
+└───────────────────────────┘            └───────────────────────────┘
 ```
 
 ---
 
-## 1. 服务端接口
+## 1. 权限模型
 
-所有请求与响应都是 `application/json; charset=utf-8`，错误统一为：
+| 角色 | 登录网页控制台 | `GET /api/v1/nodes` | 管理接口 | 上传 |
+|---|---|---|---|---|
+| `admin` | ✅ | ✅ | ✅ | ❌ |
+| `user` | ❌ | ✅ | ❌（403） | ❌ |
+
+- 账号不开放注册，全部由 CLI 或控制台创建（`-addadmin` / `-adduser`）。
+- 令牌是 32 字节随机数的 base64url，服务端只存 SHA-256；`expires_at = 0` 表示不过期。
+- 令牌失效的四种情况：用户注销、管理员改口令、管理员禁用/删号。
+- 客户端拿到 401 时清会话退回本地模式，节点数据不动，界面提示重新登录。
+
+**为什么没有上传**：早期版本是「每账号一份节点快照，双向同步」。多人共用时这个模型必然
+互相踩——一个用户改名/删节点就会影响别人。现在改成单一节点池由管理员维护，
+客户端只有拉取权，从根本上消除了越权改动。
+
+---
+
+## 2. 服务端接口
+
+请求/响应均为 `application/json; charset=utf-8`，错误统一：
 
 ```json
 {"error": {"code": "bad_credentials", "message": "用户名或口令错误"}}
 ```
 
+### 2.1 客户端用
+
 | 方法 | 路径 | 鉴权 | 说明 |
 |---|---|---|---|
-| GET | `/api/v1/health` | 否 | 探活：`{ok, name, version, time, uptime_sec}` |
-| POST | `/api/v1/auth/login` | 否 | `{username, password, device}` → `{token, expires_at, user, server_time, vault_exists}` |
+| GET | `/api/v1/health` | 否 | 探活 `{ok,name,version,time,uptime_sec}` |
+| POST | `/api/v1/auth/login` | 否 | `{username,password,device}` → `{token,expires_at,user{name,role},nodes{count,read_only}}` |
 | POST | `/api/v1/auth/logout` | 是 | 吊销当前令牌 |
-| GET | `/api/v1/auth/me` | 是 | 校验令牌，回带 `user` 与 `vault{version,updated_at,device}` |
-| GET | `/api/v1/vault` | 是 | 下载快照；服务端没有数据时返回 **204** |
-| PUT | `/api/v1/vault` | 是 | `{base_version, device, payload}`；成功 200，版本冲突 **409** |
+| GET | `/api/v1/auth/me` | 是 | 账号 + 节点池 `{version,updated_at,count}` |
+| GET | `/api/v1/nodes` | 是 | 启用中的节点，按管理员排序 |
+| GET | `/api/v1/nodes?version=N` | 是 | 版本未变时只回 `{unchanged:true}`，省流量 |
+| PUT/GET | `/api/v1/vault` | 是 | 旧协议兼容：PUT 固定 **403**，GET 固定 204 |
 
-### 1.1 登录
-
-```bash
-curl -X POST http://1.2.3.4:8080/api/v1/auth/login \
-     -H 'Content-Type: application/json' \
-     -d '{"username":"alice","password":"secret123","device":"MY-PC"}'
-```
-
-```json
-{"token":"f2RdKO…vokY","expires_at":0,
- "user":{"name":"alice","created_at":1794473665307},
- "server_time":1794473672645,"vault_exists":true}
-```
-
-- `expires_at = 0` 表示**不过期**：符合「登录后除非主动注销就永久有效」。
-  服务端不写 TTL，令牌一直有效，直到 `logout`、管理员改口令或删号。
-- 口令用 PBKDF2-HMAC-SHA256（210000 轮、16 字节随机盐）存储，
-  格式 `pbkdf2_sha256$210000$<salt-b64>$<hash-b64>`。
-- 令牌是 32 字节随机数的 base64url，服务端只存它的 SHA-256，
-  所以 `data/tokens.json` 泄露也无法直接冒用。
-- 账号不存在时也会跑一次哈希，避免用响应时间探测账号。
-- 登录失败按 IP 限速：10 分钟内 10 次，超出返回 429。
-  成功登录会清零计数。
-
-> 本程序**没有注册接口**，账号全部由管理员在服务器上用 CLI 创建（见 §4.2）。
-
-### 1.2 快照
-
-`payload` 是客户端生成的 JSON，服务端**不解析内容**，只维护版本号：
+`GET /api/v1/nodes` 响应：
 
 ```json
 {
   "version": 12,
   "updated_at": 1794473678040,
-  "device": "MY-PC",
-  "payload": {
-    "schema": 1,
-    "exported_at": 1794473677900,
-    "groups":   [ {"id":"<uuid>","mtime":1794473000000,"data":{"name":"默认","order_ids":["<uuid>"]}} ],
-    "profiles": [ {"id":"<uuid>","mtime":1794473000000,"group":"<group-uuid>",
-                   "data":{"type":"vmess","name":"HK-01","bean":{…}}} ]
-  }
+  "count": 2,
+  "read_only": true,
+  "nodes": [
+    {"id":"d9c0b6c156f9","name":"香港三网优化-限速50Mbps","type":"tuic",
+     "addr":"154.37.223.225","port":25247,"group":"香港","remark":"限速 50Mbps",
+     "link":"tuic://uuid:pass@154.37.223.225:25247?congestion_control=bbr#..."}
+  ]
 }
 ```
 
-- `id` 是**实体自带的 UUID（`sync_id`）**，不是本地 int id：
-  两台设备各自新建节点时 int id 必然撞车，`-flag_reorder` 还会整体重排 id。
-- 删除用**墓碑**表示：同结构但 `deleted: true` 且不带 `data`。
-- 实体里本机相关的字段不同步：`id`、`gid`、`yc`（延迟）、`report`（测速报告）、
-  `traffic`（流量统计）、`group.order`（换成 `order_ids` 的 UUID 列表）。
+`link` 是唯一事实来源，客户端用它还原完整节点参数；其余字段只用于识别与展示。
+
+### 2.2 管理端用
+
+前缀 `/api/v1/admin/`，全部要求 `role=admin`：
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `overview` | 服务端版本/运行时长、节点总数与启用数、账号数 |
+| GET | `nodes` | 全量节点（含禁用） |
+| POST | `nodes` | `{links:"…\n…", group, remark}` 批量录入，逐条返回成功/拒绝原因 |
+| PATCH | `nodes/{id}` | `{name?,group?,remark?,enabled?,link?}` |
+| DELETE | `nodes/{id}` | 删一条 |
+| POST | `nodes/batch` | `{ids:[…], action:"enable"\|"disable"\|"delete"}` |
+| POST | `nodes/order` | `{ids:[…]}` 按给定顺序重排 |
+| GET/POST | `users` | 列表 / `{name,password,role}` 建号 |
+| DELETE | `users/{name}` | 删号（连带吊销令牌） |
+| POST | `users/{name}/password` | `{password}`（吊销该账号旧令牌） |
+| POST | `users/{name}/state` | `{disabled:true\|false}`（禁用即吊销令牌） |
+
+不能删除/禁用"当前正在使用的管理员账号"。
+
+### 2.3 节点链接解析
+
+服务端只做最小解析，用于展示、排序与去重：协议、地址、端口、`#名称`。
+不解析具体协议参数——加新协议不用改服务端，客户端用自己的解析器还原即可。
+
+放行的协议（与客户端导入能力一致）：
+
+```
+vmess://  vless://  trojan://  ss://  socks(4/4a/5)://  http(s)://
+tuic://  hysteria2://  hy2://  naive+https://  naive+quic://
+```
+
+- 重复链接（完全相同的字符串）拒绝，返回 `该链接已在节点池中`。
+- 同名节点自动加序号 `(2)`，避免列表里一堆同名条目。
+- 非法协议/缺 host 或 port 的链接直接拒绝并给出原因。
 
 ---
 
-## 2. 鉴权方式
+## 3. 网页控制台
 
-```
-Authorization: Bearer <token>        # 主用
-X-Auth-Token: <token>                # 兼容 curl 调试
-```
+地址 `http://<服务器>:8080/admin`，单文件 HTML（`go:embed` 进二进制，无 CDN 依赖）。
 
-- **永久令牌**：客户端把令牌存 `config/sync/state.json`，每次请求带上；
-  重启、关机都不影响。只有三种情况失效：
-  1. 用户点「注销」（客户端调 `/auth/logout` 并清本地会话）；
-  2. 管理员 `-passwd` 改口令（服务端吊销该账号所有令牌）；
-  3. 管理员 `-deluser` 删号（令牌与快照一起删）。
-- 客户端在同步时若收到 **401**，自动清会话并退回本地模式，节点数据不动，
-  界面提示「登录已失效，请重新登录」。
-- 令牌明文落盘（普通桌面程序的做法）。若磁盘可能被他人接触，
-  请开 BitLocker；也可以把 `config/` 整体放到加密卷上。
-
----
-
-## 3. 上传 / 下载 / 冲突处理
-
-### 3.1 一次同步的完整顺序
-
-```
-1. 扫本地 → 算每个条目指纹，和 meta.json 对比
-     · 指纹变了        → mtime = now（这是本地改动）
-     · meta 里没有      → 新条目，mtime = now（首次基线时给 1，见下）
-     · meta 有但实体没了 → 生成墓碑（mtime = now）
-2. GET /api/v1/vault      → 得到 remote{version, payload}
-3. MergeVault(local, remote) → merged          （逐条目 LWW，见 3.2）
-4. applyVault(merged)     → 把 merged 写回本地实体与 meta
-5. merged 与 remote 内容一致？ → 结束，不制造新版本
-   ？否 → PUT {base_version: remote.version, payload: merged}
-6. PUT 返回 409 → 重新 GET，回到第 3 步；最多 3 轮
-```
-
-### 3.2 合并规则（`sync/SyncModel.cpp: MergeVault`）
-
-逐条目、按 `id`（UUID）对齐，last-write-wins：
-
-| 情况 | 结果 |
+| 区域 | 功能 |
 |---|---|
-| 只有一边有 | 采用 |
-| 两边都有、内容相同 | 保留较大的 `mtime`（避免下次又判成改动） |
-| 两边都有、内容不同 | `mtime` 大的赢；相等时**本地赢**（保证幂等） |
-| 一边是墓碑 | 与普通条目同样比 `mtime`：删除比编辑新 → 删掉；编辑比墓碑新 → 复活 |
-| `mtime` 相同且一边是墓碑 | **删除优先**（否则「被远端删掉的节点正在本机运行」会每轮复活，永不收敛） |
+| 概览卡片 | 节点总数、启用数、账号数、节点池版本与更新时间 |
+| 节点管理 | 搜索（名称/地址/分组/备注）、分组与状态筛选、批量启停/删除、上下移排序、编辑、复制链接 |
+| 添加节点 | 多行粘贴链接，可带分组/备注；逐条显示成功与拒绝原因 |
+| 账号管理 | 建号（普通/管理员）、改口令、禁用/启用、删除；显示在线设备数与最后活动时间 |
+| 接入说明 | 客户端填法、协议清单、接口一览 |
 
-要点：
+安全：
 
-- **删除也参与比较**，所以「A 设备删了节点、B 设备刚好改了这个节点」不会出现
-  删完又复活、或改完被永久吞掉的死循环，最终结果只取决于谁最后动手。
-- **首次基线**（`meta.json` 为空）时，本地已有条目的 `mtime` 统一记为 `1`：
-  服务端有数据时以服务端为准，本地独有的节点保留并上传。
-  这样「先在旧电脑攒了一堆节点，再登录」不会把云端更完整的列表覆盖掉。
-- 冲突计数只用于提示（「合并 N 处冲突」），不需要用户手工介入。
-- **全新设备**（本机没有任何节点、只有安装时自动建的空「默认」分组）首次同步时，
-  这个占位分组不参与上报，服务端有分组就用服务端的替换掉它——
-  否则每装一台新机器，云端就会多一个「默认」分组。
-- 合并是**幂等**的：`merge(merge(a,b), b) == merge(a,b)`，
-  已用 `sync/SyncModel` 的单元测试覆盖（16 条断言全过）。
-
-### 3.3 为什么把合并放在客户端
-
-服务端只做「带版本号的 blob + 乐观锁」，好处：
-
-- 服务端不关心节点格式，加新协议（新 bean 字段）不需要改服务端；
-- 冲突处理需要「本地视图」，只有客户端知道哪些条目真的被改过；
-- 服务端逻辑少，出错面小，几百行就能审计完。
-
-代价：两端同时改同一账号时会有一次 409 往返（毫秒级，用户无感）。
-
-### 3.4 服务端并发
-
-`PUT` 在**同一把写锁内**比较 `base_version` 与当前版本再落盘，
-所以两台设备同时提交时只有一台成功，另一台必拿 409 + 服务端当前快照。
-写盘走「临时文件 + fsync + rename」，断电不会出现半截 JSON。
+- 令牌存 `localStorage`（可取消"记住登录"），请求走 `Authorization: Bearer`，
+  不用 Cookie → 没有 CSRF 面；
+- 所有管理接口二次校验角色，前端隐藏只是体验，不作为权限依据；
+- 页面无外部资源，`X-Content-Type-Options: nosniff`、`Referrer-Policy: same-origin`。
 
 ---
 
-## 4. 部署
+## 4. 客户端（Windows）
 
-### 一键部署（推荐）
+### 4.1 一次拉取
 
-**在服务器上跑**（全新 Ubuntu/Debian/CentOS/Alpine 都行，自动装依赖、装 Go、拉源码、编译、装服务）：
+```
+1. GET /api/v1/nodes?version=<上次版本>
+2. unchanged → 结束
+3. 逐条对照（key = 服务端节点 id → 本地实体 sync_id = "srv:<id>"）：
+   · 本地没有            → 解析 link，新建实体到对应分组
+   · 有、链接指纹未变     → 不动（本地改名/调参不会被覆盖）
+   · 有、链接指纹变了     → 同协议只换 bean 内容并保留本地 id/gid；
+                           协议变了则删旧建新（正在运行则跳过这一轮）
+4. 服务端已删除/禁用的（本地有、服务端列表里没有）：
+   · 没在运行 → 删除本地实体与落地记录
+   · 正在运行 → 保留，日志提示，下一轮再删
+5. 分组内顺序按服务端顺序写一次；写 state.json / nodes.json
+```
+
+本地实体上的 `sync_id` 固定为 `srv:<id>`，所以反复拉取不会产生重复节点。
+
+### 4.2 触发时机
+
+| 时机 | 说明 |
+|---|---|
+| 登录成功后 | 立即拉一次 |
+| 启动后 3 秒 | 等主窗口铺好列表再拉 |
+| 定时 | 默认每 30 分钟（可选 15 分钟 ~ 12 小时，可关闭） |
+| 手动 | 对话框「立即拉取」 |
+
+### 4.3 本地对拉下来的节点做了什么
+
+- 按服务端 `group` 字段自动建分组，分组 `sync_id = "srvgrp:<名称>"`；
+  `group` 为空时落到「云端节点」。
+- 可以本地改名、改端口、调参数——**只影响本机**，不会被上传，也不会影响别人。
+- 服务端下次改了这条节点的链接才会覆盖它。
+- 删除服务端节点后，客户端下次拉取会把本地那条删掉（正在用时延后）。
+
+### 4.4 离线与错误
+
+| 场景 | 行为 |
+|---|---|
+| 未登录 | 全功能本地使用，不产生任何网络请求 |
+| 断网启动 | 正常读本地配置；拉取失败进入 `Offline`，5s→10s→…→5min 退避重试 |
+| 服务端 5xx | 同样退避重试，不弹窗打扰 |
+| 令牌失效（401） | 清会话退回本地模式，本地节点不动，提示重新登录 |
+| 服务端下发了无法解析的链接 | 跳过该条并记日志，其余照常应用 |
+
+### 4.5 本地文件
+
+```
+config/sync/state.json   服务器、账号、令牌、角色、上次版本/时间/节点数、自动拉取设置
+config/sync/nodes.json   「服务端节点 id → 本地 sync_id + 上次应用的链接指纹」
+```
+
+令牌明文落盘（普通桌面程序做法）。磁盘可能被他人接触时请开 BitLocker。
+
+---
+
+## 5. 部署
+
+### 一键部署
 
 ```bash
 cd Rekobox/RekoboxForWindows/server && bash deploy.sh
 ```
 
-没有仓库也没关系：随便放一份 `deploy.sh` 执行即可，它会自己 `git clone`
-（失败则下载源码包）。口令不回显、不落盘、不进 `ps`（通过 stdin 传给 `-adduser`），
-留空自动生成 20 位随机口令且只显示一次。
+默认创建**管理员**账号（`-addadmin`），完成后打印：
 
-端口默认 8080，交互运行时会单独询问，也可以 `--port 9000` 指定；
-想只对本机开放（前置 nginx）用 `--listen 127.0.0.1:8080`。
-改端口后 systemd 的 `-addr`、防火墙放行、输出的客户端地址会一起变。
-
-**在开发机上跑**（Windows/macOS，SSH 推到服务器）：
-
-```bash
-cd RekoboxForWindows/server && bash deploy-remote.sh
+```
+网页控制台  http://<公网IP>:8080/admin
+客户端填    http://<公网IP>:8080
 ```
 
-本机有 Go 就只上传交叉编译好的二进制（服务器不需要 Go、不需要外网）；
-本机没 Go 就上传 `deploy.sh` 让服务器自己编译。非交互与环境变量用法见 `server/README.md`。
-
-### 4.1 编译服务端
-
-服务器上直接编（需 Go 1.21+，国内用 `goproxy.cn`）：
+### 手动
 
 ```bash
-cd RekoboxForWindows/server
-GOFLAGS=-mod=mod GOPROXY=https://goproxy.cn,direct \
-  CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o rekosync .
-# 单文件约 8.5MB，无运行时依赖
+GOFLAGS=-mod=mod GOPROXY=https://goproxy.cn,direct CGO_ENABLED=0 \
+  go build -trimpath -ldflags "-s -w" -o rekosync .      # 单文件约 5-6MB
+
+./rekosync -data /opt/rekosync/data -addadmin root       # 建管理员
+./rekosync -data /opt/rekosync/data -adduser  alice      # 建普通用户
+./rekosync -data /opt/rekosync/data -users
+./rekosync -data /opt/rekosync/data -passwd  alice       # 踢掉旧令牌
+./rekosync -data /opt/rekosync/data -disable alice
 ```
 
-或在 Windows 开发机上交叉编译后上传：
+### 对外开放
 
-```bash
-GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o rekosync .
-scp rekosync root@1.2.3.4:/opt/rekosync/
-```
+- 直接用 HTTP：`-addr :8080`，安全组/`ufw` 放行 8080。
+- 想加 TLS：`-addr 127.0.0.1:8080` + nginx 反代，客户端地址改成 `https://` 即可，
+  服务端代码不用改。
+- **HTTP 明文意味着口令与节点链接在链路上可见**，公网长期使用请务必上 TLS。
 
-### 4.2 创建账号（没有注册接口）
-
-```bash
-# 交互式输口令（不回显需自行加 stty -echo，或直接用 -password）
-/opt/rekosync/rekosync -data /opt/rekosync/data -adduser alice
-
-# 或一步到位
-/opt/rekosync/rekosync -data /opt/rekosync/data -adduser alice -password 'strong-pass'
-
-/opt/rekosync/rekosync -data /opt/rekosync/data -users            # 列账号
-/opt/rekosync/rekosync -data /opt/rekosync/data -passwd  alice    # 改口令（踢掉旧令牌）
-/opt/rekosync/rekosync -data /opt/rekosync/data -deluser alice    # 删号（连带删快照）
-```
-
-用户名限制：小写字母/数字/`_-.`，2–32 位，不以符号开头（防路径穿越）。
-口令至少 6 位。
-
-### 4.3 systemd
-
-```bash
-useradd -r -s /usr/sbin/nologin rekosync
-mkdir -p /opt/rekosync/data
-cp rekosync /opt/rekosync/ && chown -R rekosync:rekosync /opt/rekosync
-cp RekoboxForWindows/server/rekosync.service /etc/systemd/system/
-# 首次必须先建账号（以 root 执行，服务用 rekosync 用户跑）
-/opt/rekosync/rekosync -data /opt/rekosync/data -adduser alice
-chown -R rekosync:rekosync /opt/rekosync/data
-systemctl daemon-reload && systemctl enable --now rekosync
-systemctl status rekosync --no-pager
-journalctl -u rekosync -f           # 每个请求一行：方法 路径 状态码 耗时 IP
-```
-
-### 4.4 端口与防火墙
-
-- 直接用 HTTP：`-addr :8080`，云厂商安全组/`ufw` 放行 8080。
-- 想只让本机反代：`-addr 127.0.0.1:8080` + nginx。
-  以后要上 HTTPS，nginx 加一段即可，客户端把地址改成 `https://` 开头就行
-  （服务端代码不变）。
-- **HTTP 明文传输意味着口令与节点配置在链路上可被看到**，
-  仅建议在可信网络或已用 WireGuard/内网穿透兜底时使用；
-  公网长期使用请务必加 TLS。
-
-### 4.5 备份与迁移
+### 备份 / 迁移
 
 ```bash
 tar czf rekosync-$(date +%F).tgz -C /opt/rekosync data
 ```
 
-`data/` 是全部状态（账号、令牌、快照），拷走即迁移完成；
-换机器后改 systemd 的 `-data` 路径即可。
+`data/` 是全部状态（账号、令牌、节点池），拷走即迁移完成。
 
-### 4.6 客户端
+---
+
+## 6. 客户端使用
 
 1. 启动 `rekobox.exe`。
-2. 顶栏「首选项」→「账号与同步」（也可从菜单进入）。
-3. 填服务器地址（`1.2.3.4:8080` 或 `http://1.2.3.4:8080`）、用户名、口令 → 登录。
-4. 登录成功后自动同步一次；之后：
-   - 本地增删改节点/分组，5 秒防抖后自动上传；
-   - 启动后 3 秒自动拉一次；
-   - 也可手动点「立即同步」。
-5. 断网时状态显示「离线，稍后自动重试」，恢复后按 5s→10s→…→5min 退避自动补上。
-
-客户端文件位置（`-appdata` 或默认 exe 同目录）：
-
-```
-config/sync/state.json   服务器、账号、令牌、设备名、上次同步版本/时间
-config/sync/meta.json    每个条目的内容指纹与 mtime、待同步墓碑
-```
+2. 菜单「首选项」→「账号与节点订阅」。
+3. 填服务器地址（`1.2.3.4:8080` 或 `http://1.2.3.4:8080`）、账号、口令 → 登录。
+4. 登录后自动拉取；之后按 §4.2 的时机更新。
+5. 想停掉自动更新：取消「自动拉取节点」，或用下拉框改成更大的间隔。
 
 ---
 
-## 5. 离线、缓存与重连
+## 7. 已知限制
 
-| 场景 | 行为 |
-|---|---|
-| 未登录 | 全功能本地使用，不产生任何网络请求 |
-| 登录后断网启动 | 正常读本地配置；同步失败进入 `Offline`，退避重试 |
-| 断网期间改节点 | 直接落盘，`pending=true` 持久化；联网后自动上传 |
-| 断网期间删节点 | 删除照常生效；下次同步时由「meta 有、实体无」生成墓碑上传 |
-| 杀进程/断电 | `state.json`、`meta.json` 每步即时写（临时文件+rename），不丢状态 |
-| 令牌失效（401） | 清会话退回本地模式，节点不动，提示重新登录 |
-| 服务端 5xx | 与断网同样退避重试，不弹窗打扰 |
-| 远端删掉的节点正在本机运行 | 不立即删除（内核还在用它），日志提示；停止代理后下一轮同步删除 |
-
-「本地缓存」就是程序原本的 `config/profiles/*.json`、`config/groups/*.json`——
-云端同步是叠加层，不是替代品，所以任何同步故障都不影响本地可用性。
+1. **单进程服务**：账号/令牌/节点池缓存在内存，多开同一 `data` 目录会互相覆盖。
+2. **改端口等于换链接**：服务端只按 `link` 判断有没有变化，编辑节点链接才会推给客户端。
+3. **本地改动不上传**：这是设计目标，不是缺陷。需要共享的改动请交给管理员。
+4. **Android 端尚未适配**：安卓客户端仍是旧的双向快照协议，连新服务端会拿到 403；
+   安卓本地节点不受影响。后续按同样的只读模型改。
+5. **旧快照留着不删**：`data/vaults/*.json` 不再读写，确认不需要后可手工删除。
+6. **节点链接含明文密钥**：`data/nodes.json` 里是明文，磁盘请做加密或严格权限
+   （默认 0600/0700）。
 
 ---
 
-## 6. 已知限制
-
-1. **单进程服务**：内存里缓存账号/令牌/快照，多开同一 `data` 目录会互相覆盖。
-   一个实例足够；要横向扩展需换数据库。
-2. **不做逐字段合并**：同一节点的「名称」和「端口」被两台设备同时改，
-   只有整条记录的赢家生效，输家的那次修改不回滚到字段级。
-3. **时钟偏差**：`mtime` 取本机时间，两台机器差很多时冲突判定会偏向时间快的。
-   可用 `w32tm /resync` 校准；偏差在秒级时无实际影响。
-4. **注销会清基线**：注销期间的删除不会同步到其他设备（下次登录按「首次基线」
-   处理，以服务端为准）。要删除请先登录再删。
-5. **墓碑保留 30 天**：超过 30 天且已同步到服务端的删除记录会被清理；
-   长期离线（>30 天）的设备重新上线时，可能把已删节点当作「本地新增」补回去。
-6. 节点里的口令/密钥是**明文**存服务端 `data/vaults/*.json`，
-   服务器磁盘请做加密或严格权限（文件 0600、目录 0700，本服务默认如此）。
-
----
-
-## 7. 代码位置
+## 8. 代码位置
 
 | 文件 | 职责 |
 |---|---|
-| `sync/SyncModel.{hpp,cpp}` | 报文结构、逐条目合并、指纹（纯函数，可单测） |
-| `sync/SyncStore.{hpp,cpp}` | `state.json` / `meta.json` 读写、会话清理 |
-| `sync/SyncApi.{hpp,cpp}` | Qt Network 封装：Bearer 头、20s 超时、错误文案 |
-| `sync/SyncEngine.{hpp,cpp}` | 状态机：登录/注销/同步/退避重试/应用远端数据 |
-| `sync/SyncNotify.hpp` | db 层通知同步模块的唯一入口（避免循环包含） |
-| `ui/dialog_account.{h,cpp}` | 「账号与同步」对话框 |
-| `db/ProxyEntity.hpp`、`db/Group.hpp` | 新增 `sync_id`（UUID）字段 |
-| `main/NekoGui_ConfigItem.hpp` | 新增 `callback_after_save`，用于感知本地改动 |
-| `server/*.go` | 服务端：`store.go` 存储、`auth.go` 口令令牌、`api.go` 路由、`main.go` CLI |
-| `server/deploy.sh` | 服务器端一键安装：装依赖/Go → 拉源码 → 编译 → systemd → 建号 → 自检 |
-| `server/deploy-remote.sh` | 开发机远程部署：交叉编译上传，或把安装脚本丢给服务器执行 |
-
----
-
-## 8. Android 端
-
-安卓客户端用**同一套协议、同一台服务器**，服务端代码无需任何改动。
-入口：侧边抽屉菜单 →「账号与同步」，位置在「配置」之上。
-
-### 8.1 与 Windows 的差异
-
-| 关注点 | Windows | Android |
-|---|---|---|
-| 本地存储 | JSON 文件（`config/profiles/*.json`） | Room 数据库（`proxy_entities` / `proxy_groups`） |
-| 条目标识 | 实体自带 `sync_id` 字段 | 不改表结构，`sync_id` 与本地 id 的绑定存在 `files/sync/meta.json` |
-| 会话 | `config/sync/state.json` | `SharedPreferences("rekosync")` |
-| 同步引擎 | `sync/SyncEngine`（Qt 事件循环） | `sync/SyncEngine`（Kotlin 协程 + HttpURLConnection） |
-| 触发 | 启动 3s、改动防抖 5s、手动 | 同左（`ProfileManager.Listener` 感知增删改） |
-
-编解码统一在 `SyncMapper`：把 Android 的 bean 转成 nekoray 的简写 JSON（`_v/addr/port/id/aid/sec/stream{...}`），
-再包成 `{"type": "...", "bean": {...}}` 作为条目 `data`；反向同理。所以两端的节点是同一份数据。
-
-### 8.2 类型覆盖
-
-| 类型 | 互转 | 说明 |
-|---|---|---|
-| socks / http | ✅ | 含用户名口令、stream 传输层设置 |
-| shadowsocks | ✅ | method / password / plugin |
-| vmess | ✅ | uuid / aid / 加密方式 + ws/grpc/h2/tcp + tls/reality |
-| vless | ✅ | uuid 放 `pass`，flow 放 `flow` |
-| trojan | ✅ | password + 同上传送层 |
-| hysteria2 | ✅ | 认证串、混淆密码、上下行带宽、sni/alpn、端口跳跃 |
-| tuic | ✅ | uuid + token、拥塞控制、UDP 中继模式、0-RTT |
-| naive | ✅ | 用户名口令、协议（https/quic）、额外请求头 |
-| hysteria v1、ssr、trojan-go、wg、ssh、chain、config… | 原样透传 | 安卓不解析、不修改、不删除，下次同步原样带回，Windows 侧仍然正常 |
-
-也就是说：安卓上能编辑的是上表前八类；其余条目在安卓端**不可见**，但云端不会因此丢失。
-后续要支持更多类型，只需在 `SyncMapper` 增加一对映射函数。
-
-两个实现细节（都踩过）：
-
-1. bean 落库前必须 `applyDefaultValues()`。`HysteriaBean.serialize()` 会直接
-   `writeInt(protocol)`、`TuicBean.serialize()` 会 `writeInt(mtu)`，这些 `Integer`
-   为 null 时写库直接 NPE（"Integer.intValue() on a null object"）。
-2. 组内顺序：导入时按 `order_ids` 校正本地 `userOrder`，导出时按 `userOrder` 生成
-   `order_ids`。否则安卓按创建顺序排列，再推回去会把 Windows 的排序打乱。
-
-### 8.3 一致性与冲突
-
-与 §3 完全相同：条目级 last-write-wins、墓碑表示删除、同一时刻删除优先、
-首次建立基线时以服务端为准（本地独有条目保留并上传）。
-
-安卓额外处理：分组只同步 `name`（订阅 `url` 仅在安卓有值时导出），
-分组内排序沿用各端本地顺序，避免把 Windows 的 int id 顺序写进另一端。
-
-### 8.4 已知限制
-
-1. 安卓端固定直连同步服务器，没有「经代理同步」开关（服务端在境内时够用）。
-2. 单条节点的**部分高级字段**（如 mux 细分参数、xhttp 扩展、tuic 的 mtu/心跳）不参与互转，
-   以两端都认识的字段为准；从 Windows 拉到安卓再改回，可能丢掉这些字段的差异。
-3. hysteria **v1** 与 Windows 的 hysteria2 不是同一个协议，安卓端按「看不懂」透传。
-4. 真机回归已覆盖：四种类型导入（列表显示正确类型）、组内顺序、删除传播（墓碑）；
-   未覆盖：订阅分组自动更新、大列表（>500 节点）。
+| `server/nodes.go` | 节点池存储、分享链接解析、排序与去重 |
+| `server/api.go` | 客户端接口：登录、`GET /nodes`、旧 vault 兼容、日志中间件 |
+| `server/admin.go` | 管理接口分发、概览、账号管理、内嵌网页 |
+| `server/web/admin.html` | 网页控制台（单文件，内联 CSS/JS） |
+| `server/store.go` | 账号/令牌（PBKDF2、SHA-256 令牌键）、角色与禁用 |
+| `server/main.go` | CLI 子命令、HTTP 启动、优雅退出 |
+| `sync/SyncEngine.{hpp,cpp}` | 拉取状态机、链接→实体、落地与清理 |
+| `sync/SyncStore.{hpp,cpp}` | `state.json` / `nodes.json` 读写 |
+| `sync/SyncApi.{hpp,cpp}` | Qt Network 封装：Bearer、20s 超时、错误文案 |
+| `sync/SyncModel.{hpp,cpp}` | `sync_id` 生成、时间戳、内容指纹 |
+| `ui/dialog_account.{h,cpp}` | 「账号与节点订阅」对话框 |

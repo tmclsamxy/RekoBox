@@ -38,7 +38,16 @@ type User struct {
 	Password  string `json:"password"`
 	CreatedAt int64  `json:"created_at"`
 	Disabled  bool   `json:"disabled,omitempty"`
+	// Role 只有 admin / user 两种：
+	//   admin 可登录网页控制台管理节点与账号
+	//   user  只能用客户端拉取节点（只读，不能上传）
+	Role string `json:"role,omitempty"`
 }
+
+// RoleAdmin 是网页控制台的准入角色。
+const RoleAdmin = "admin"
+
+func (u *User) isAdmin() bool { return u.Role == RoleAdmin }
 
 type Session struct {
 	User      string `json:"user"`
@@ -157,12 +166,18 @@ func (s *Store) saveVaultLocked(v *Vault) error {
 
 // ---- 用户管理（只在服务端 CLI 调用，不暴露 HTTP 注册接口）----
 
-func (s *Store) CreateUser(name, password string) (*User, error) {
+func (s *Store) CreateUser(name, password, role string) (*User, error) {
 	if !validUserName(name) {
 		return nil, fmt.Errorf("非法用户名 %q：只允许小写字母、数字与 _-.，2-32 位且不以符号开头", name)
 	}
 	if len(password) < 6 {
 		return nil, fmt.Errorf("口令至少 6 位")
+	}
+	if role == "" {
+		role = "user"
+	}
+	if role != "user" && role != RoleAdmin {
+		return nil, fmt.Errorf("角色只能是 user 或 admin")
 	}
 	hash, err := hashPassword(password)
 	if err != nil {
@@ -173,13 +188,37 @@ func (s *Store) CreateUser(name, password string) (*User, error) {
 	if _, ok := s.users[name]; ok {
 		return nil, ErrUserExists
 	}
-	u := &User{Name: name, Password: hash, CreatedAt: time.Now().UnixMilli()}
+	u := &User{Name: name, Password: hash, CreatedAt: time.Now().UnixMilli(), Role: role}
 	s.users[name] = u
 	if err := s.saveUsersLocked(); err != nil {
 		delete(s.users, name)
 		return nil, err
 	}
 	return u, nil
+}
+
+// SetDisabled 禁用/启用账号。禁用会顺手吊销该账号的全部令牌，
+// 否则已经登录的设备仍能继续拉节点。
+func (s *Store) SetDisabled(name string, disabled bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	u, ok := s.users[name]
+	if !ok {
+		return ErrNoUser
+	}
+	u.Disabled = disabled
+	if err := s.saveUsersLocked(); err != nil {
+		return err
+	}
+	if disabled {
+		for id, sess := range s.tokens {
+			if sess.User == name {
+				delete(s.tokens, id)
+			}
+		}
+		return s.saveTokensLocked()
+	}
+	return nil
 }
 
 func (s *Store) SetPassword(name, password string) error {
@@ -329,6 +368,22 @@ func (s *Store) RevokeToken(token string) {
 	}
 	delete(s.tokens, id)
 	_ = s.saveTokensLocked()
+}
+
+// SessionStat 给管理界面用：在线设备数（未撤销的令牌个数）与最后活动时间。
+func (s *Store) SessionStat(user string) (count int, lastUsed int64) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, sess := range s.tokens {
+		if sess.User != user {
+			continue
+		}
+		count++
+		if sess.LastUsed > lastUsed {
+			lastUsed = sess.LastUsed
+		}
+	}
+	return count, lastUsed
 }
 
 // ---- 节点快照 ----

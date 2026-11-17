@@ -27,7 +27,7 @@ Rekobox/
 | 平台 | 版本 | 产物 | 链接 |
 |---|---|---|---|
 | Android | v1.0.5 | 4 个 split APK | [releases/tag/v1.0.5](https://github.com/tmclsamxy/RekoBox/releases/tag/v1.0.5) |
-| Windows | win-v1.0.14 | `Rekobox-1.0.14-windows-x64-qt.zip` | [releases/tag/win-v1.0.14](https://github.com/tmclsamxy/RekoBox/releases/tag/win-v1.0.14) |
+| Windows | win-v1.0.15 | `Rekobox-1.0.15-windows-x64-qt.zip` + `rekosync` 服务端 | [releases/tag/win-v1.0.15](https://github.com/tmclsamxy/RekoBox/releases/tag/win-v1.0.15) |
 
 ## 架构差异（为什么不是一套代码编译两次）
 
@@ -77,7 +77,7 @@ curl --proxy http://127.0.0.1:2080 https://ip.sb
 | `docs/01-android-rebrand.md` | Android 改名清单：每个文件改哪一行、为什么 |
 | `docs/02-windows-port.md` | Windows 移植方案：架构差异、目录结构、分阶段步骤 |
 | `docs/03-release.md` | 发布流程与产物约定 |
-| `docs/04-account-sync.md` | 账号登录与云端同步：接口、鉴权、冲突合并、离线策略、服务端部署 |
+| `docs/04-account-sync.md` | 账号与节点池：只读订阅模型、网页控制台、接口、权限、离线策略、服务端部署 |
 
 ## 许可
 

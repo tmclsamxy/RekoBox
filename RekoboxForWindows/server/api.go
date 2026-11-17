@@ -3,13 +3,17 @@ package main
 // HTTP 接口层。所有响应都是 JSON，错误统一为：
 //   {"error":{"code":"...","message":"..."}}
 //
-// 路由：
+// 客户端接口（任意已登录账号）：
 //   GET  /api/v1/health          探活（不需要鉴权）
 //   POST /api/v1/auth/login      登录，发永久令牌
 //   POST /api/v1/auth/logout     注销，吊销当前令牌
-//   GET  /api/v1/auth/me         校验令牌 + 回带账号与快照版本
-//   GET  /api/v1/vault           下载节点快照（204 表示服务端还没有数据）
-//   PUT  /api/v1/vault           上传节点快照（乐观锁，冲突返回 409 + 服务端当前快照）
+//   GET  /api/v1/auth/me         校验令牌 + 回带账号角色
+//   GET  /api/v1/nodes           拉取节点池（只读；禁用节点不下发）
+//
+// 管理端接口（role=admin）在 admin.go；网页控制台挂在 /admin。
+//
+// 只读约束：节点池由管理员统一维护，客户端没有任何写入入口。
+// 旧的 /api/v1/vault（双向快照）保留 GET 兼容，PUT 直接 403。
 
 import (
 	"encoding/json"
@@ -18,6 +22,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -25,14 +30,16 @@ import (
 
 type Server struct {
 	store   *Store
+	nodes   *NodeStore
 	limiter *loginLimiter
 	started time.Time
 	version string
 }
 
-func NewServer(store *Store, version string) *Server {
+func NewServer(store *Store, nodes *NodeStore, version string) *Server {
 	return &Server{
 		store:   store,
+		nodes:   nodes,
 		limiter: newLoginLimiter(10, 10*time.Minute),
 		started: time.Now(),
 		version: version,
@@ -45,8 +52,17 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/v1/auth/login", s.withLog(s.handleLogin))
 	mux.HandleFunc("/api/v1/auth/logout", s.withLog(s.handleLogout))
 	mux.HandleFunc("/api/v1/auth/me", s.withLog(s.handleMe))
-	mux.HandleFunc("/api/v1/vault", s.withLog(s.handleVault))
+	mux.HandleFunc("/api/v1/nodes", s.withLog(s.handleNodes))
+	mux.HandleFunc("/api/v1/vault", s.withLog(s.handleVaultLegacy))
+	mux.HandleFunc("/api/v1/admin/", s.withLog(s.handleAdmin))
+	mux.HandleFunc("/admin", s.serveAdminPage)
+	mux.HandleFunc("/admin/", s.serveAdminPage)
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/" {
+			// 根路径直接跳控制台，省得管理员记路径
+			http.Redirect(w, r, "/admin", http.StatusFound)
+			return
+		}
 		writeErr(w, http.StatusNotFound, "not_found", "没有这个接口："+r.URL.Path)
 	})
 	return mux
@@ -159,11 +175,15 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	s.limiter.Reset(ip)
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"token":        token,
-		"expires_at":   0, // 0 = 永久有效，只有注销或服务端删号才失效
-		"user":         map[string]any{"name": user.Name, "created_at": user.CreatedAt},
-		"server_time":  time.Now().UnixMilli(),
-		"vault_exists": s.vaultExists(user.Name),
+		"token":      token,
+		"expires_at": 0, // 0 = 永久有效，只有注销或服务端删号才失效
+		"user": map[string]any{
+			"name":       user.Name,
+			"created_at": user.CreatedAt,
+			"role":       roleOf(user),
+		},
+		"server_time": time.Now().UnixMilli(),
+		"nodes":       map[string]any{"count": len(s.nodes.List()), "read_only": true},
 	})
 }
 
@@ -188,99 +208,67 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 	if u == nil {
 		return
 	}
-	resp := map[string]any{
-		"user":        map[string]any{"name": u.Name, "created_at": u.CreatedAt},
+	version, updatedAt, count := s.nodes.Version()
+	writeJSON(w, http.StatusOK, map[string]any{
+		"user":        map[string]any{"name": u.Name, "created_at": u.CreatedAt, "role": roleOf(u)},
 		"server_time": time.Now().UnixMilli(),
-		"vault":       nil,
-	}
-	if v, ok := s.store.GetVault(u.Name); ok {
-		resp["vault"] = map[string]any{
-			"version":    v.Version,
-			"updated_at": v.UpdatedAt,
-			"device":     v.Device,
-		}
-	}
-	writeJSON(w, http.StatusOK, resp)
+		"nodes": map[string]any{
+			"version":    version,
+			"updated_at": updatedAt,
+			"count":      count,
+			"read_only":  true,
+		},
+	})
 }
 
-func (s *Server) handleVault(w http.ResponseWriter, r *http.Request) {
-	u := s.requireUser(w, r)
-	if u == nil {
+// handleNodes 是客户端的唯一数据入口：只读节点池。
+// ?version=<上次拿到的版本> 命中时只回 unchanged，省一次流量。
+func (s *Server) handleNodes(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeErr(w, http.StatusMethodNotAllowed, "method_not_allowed", "只支持 GET；节点由管理员维护，客户端无上传接口")
+		return
+	}
+	if s.requireUser(w, r) == nil {
+		return
+	}
+	version, updatedAt, _ := s.nodes.Version()
+	if since := strings.TrimSpace(r.URL.Query().Get("version")); since != "" {
+		if v, err := strconv.ParseInt(since, 10, 64); err == nil && v == version {
+			writeJSON(w, http.StatusOK, map[string]any{
+				"version":    version,
+				"updated_at": updatedAt,
+				"unchanged":  true,
+				"read_only":  true,
+			})
+			return
+		}
+	}
+	list := s.nodes.List()
+	if list == nil {
+		list = []NodeSummary{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"version":    version,
+		"updated_at": updatedAt,
+		"count":      len(list),
+		"read_only":  true,
+		"nodes":      list,
+	})
+}
+
+// handleVaultLegacy 兼容旧客户端：不再按账号存快照。
+// GET 一律 204（“服务端没有数据”），PUT 明确 403，避免旧客户端以为推送成功。
+func (s *Server) handleVaultLegacy(w http.ResponseWriter, r *http.Request) {
+	if s.requireUser(w, r) == nil {
 		return
 	}
 	switch r.Method {
-	case http.MethodGet:
-		v, ok := s.store.GetVault(u.Name)
-		if !ok {
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]any{
-			"version":    v.Version,
-			"updated_at": v.UpdatedAt,
-			"device":     v.Device,
-			"payload":    json.RawMessage(v.Payload),
-		})
-	case http.MethodPut:
-		var req struct {
-			BaseVersion int64           `json:"base_version"`
-			Device      string          `json:"device"`
-			Payload     json.RawMessage `json:"payload"`
-		}
-		if err := decodeJSON(w, r, &req); err != nil {
-			writeErr(w, http.StatusBadRequest, "bad_request", err.Error())
-			return
-		}
-		if len(req.Payload) == 0 {
-			writeErr(w, http.StatusBadRequest, "bad_request", "payload 不能为空")
-			return
-		}
-		// payload 必须是 JSON 对象：服务端不解析内容，但要求结构可控
-		var probe map[string]json.RawMessage
-		if err := json.Unmarshal(req.Payload, &probe); err != nil {
-			writeErr(w, http.StatusBadRequest, "bad_request", "payload 必须是 JSON 对象")
-			return
-		}
-		device := req.Device
-		if device == "" {
-			device = r.Header.Get("User-Agent")
-		}
-		v, err := s.store.PutVault(u.Name, req.BaseVersion, device, req.Payload)
-		if errors.Is(err, ErrVersionConflict) {
-			body := map[string]any{
-				"error": map[string]any{
-					"code":    "version_conflict",
-					"message": "服务端版本已更新，请合并后重试",
-				},
-			}
-			if v != nil {
-				body["current"] = map[string]any{
-					"version":    v.Version,
-					"updated_at": v.UpdatedAt,
-					"device":     v.Device,
-					"payload":    json.RawMessage(v.Payload),
-				}
-			}
-			writeJSON(w, http.StatusConflict, body)
-			return
-		}
-		if err != nil {
-			writeErr(w, http.StatusInternalServerError, "internal", err.Error())
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]any{
-			"version":    v.Version,
-			"updated_at": v.UpdatedAt,
-			"device":     v.Device,
-		})
+	case http.MethodPut, http.MethodPost:
+		writeErr(w, http.StatusForbidden, "read_only",
+			"节点由管理员统一维护，客户端不能上传；请升级到支持只读节点池的客户端版本")
 	default:
-		writeErr(w, http.StatusMethodNotAllowed, "method_not_allowed", "只支持 GET/PUT")
+		w.WriteHeader(http.StatusNoContent)
 	}
-}
-
-func (s *Server) vaultExists(user string) bool {
-	_, ok := s.store.GetVault(user)
-	return ok
 }
 
 // ---- 工具 ----

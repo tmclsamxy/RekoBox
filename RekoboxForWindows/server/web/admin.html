@@ -1,0 +1,1165 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RekoBox 节点控制台</title>
+<style>
+  :root {
+    --bg: #f4f6f8;
+    --panel: #ffffff;
+    --panel-2: #fafbfc;
+    --line: #e3e7eb;
+    --text: #171a1f;
+    --muted: #6a7280;
+    --accent: #2563eb;
+    --accent-soft: #e8efff;
+    --ok: #15803d;
+    --ok-soft: #e7f6ec;
+    --warn: #b45309;
+    --warn-soft: #fdf3e3;
+    --bad: #b91c1c;
+    --bad-soft: #fdeaea;
+    --shadow: 0 1px 2px rgba(16, 24, 40, .06), 0 8px 24px -12px rgba(16, 24, 40, .18);
+    --radius: 12px;
+    --mono: ui-monospace, SFMono-Regular, "Cascadia Mono", Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #101317;
+      --panel: #171b21;
+      --panel-2: #1d222a;
+      --line: #262c35;
+      --text: #e9edf3;
+      --muted: #98a1ae;
+      --accent: #6c9cff;
+      --accent-soft: #1c2740;
+      --ok: #4ade80;
+      --ok-soft: #14281c;
+      --warn: #fbbf24;
+      --warn-soft: #2a2114;
+      --bad: #f87171;
+      --bad-soft: #2b1618;
+      --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 12px 32px -16px rgba(0, 0, 0, .6);
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 14px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: var(--accent); text-decoration: none; }
+  code, .mono { font-family: var(--mono); font-size: 12.5px; }
+
+  /* ---------- 登录 ---------- */
+  #login {
+    min-height: 100%;
+    display: grid;
+    place-items: center;
+    padding: 24px;
+  }
+  .login-card {
+    width: 100%;
+    max-width: 380px;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    box-shadow: var(--shadow);
+    padding: 28px 26px 24px;
+  }
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-weight: 650;
+    letter-spacing: .2px;
+  }
+  .logo {
+    width: 30px; height: 30px;
+    border-radius: 9px;
+    background: linear-gradient(140deg, #3b82f6, #6366f1 55%, #8b5cf6);
+    color: #fff;
+    display: grid; place-items: center;
+    font-size: 15px; font-weight: 700;
+  }
+  .login-card h1 { font-size: 17px; margin: 18px 0 4px; }
+  .login-card p.sub { margin: 0 0 18px; color: var(--muted); font-size: 13px; }
+  .field { margin-bottom: 12px; }
+  .field label {
+    display: block;
+    font-size: 12px;
+    color: var(--muted);
+    margin-bottom: 5px;
+  }
+  input[type=text], input[type=password], input[type=search], select, textarea {
+    width: 100%;
+    padding: 9px 11px;
+    border: 1px solid var(--line);
+    border-radius: 9px;
+    background: var(--panel-2);
+    color: var(--text);
+    font: inherit;
+    outline: none;
+    transition: border-color .15s, box-shadow .15s;
+  }
+  input:focus, select:focus, textarea:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-soft);
+  }
+  textarea { resize: vertical; min-height: 96px; font-family: var(--mono); font-size: 12.5px; }
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 14px;
+    border-radius: 9px;
+    border: 1px solid var(--line);
+    background: var(--panel);
+    color: var(--text);
+    font: inherit;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background .15s, border-color .15s, opacity .15s;
+  }
+  .btn:hover { background: var(--panel-2); }
+  .btn:disabled { opacity: .5; cursor: not-allowed; }
+  .btn-primary {
+    background: var(--accent);
+    border-color: transparent;
+    color: #fff;
+    font-weight: 600;
+  }
+  .btn-primary:hover { filter: brightness(1.06); }
+  .btn-danger { color: var(--bad); border-color: var(--line); }
+  .btn-danger:hover { background: var(--bad-soft); border-color: var(--bad); }
+  .btn-sm { padding: 5px 9px; font-size: 12.5px; border-radius: 7px; }
+  .btn-block { width: 100%; justify-content: center; margin-top: 6px; }
+  .err {
+    margin-top: 12px;
+    padding: 9px 11px;
+    border-radius: 9px;
+    background: var(--bad-soft);
+    color: var(--bad);
+    font-size: 12.5px;
+    display: none;
+  }
+
+  /* ---------- 主界面 ---------- */
+  #app { display: none; }
+  header.top {
+    position: sticky; top: 0; z-index: 20;
+    display: flex; align-items: center; gap: 14px;
+    padding: 12px 22px;
+    background: color-mix(in srgb, var(--panel) 92%, transparent);
+    backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line);
+  }
+  .top .spacer { flex: 1; }
+  .meta { color: var(--muted); font-size: 12.5px; }
+  .dot {
+    display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+    background: var(--ok); margin-right: 6px; vertical-align: 1px;
+  }
+  main { max-width: 1180px; margin: 0 auto; padding: 20px 22px 64px; }
+
+  .cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 12px;
+    margin-bottom: 18px;
+  }
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 12px 14px;
+  }
+  .card .k { color: var(--muted); font-size: 12px; }
+  .card .v { font-size: 21px; font-weight: 650; margin-top: 2px; font-variant-numeric: tabular-nums; }
+  .card .v small { font-size: 12px; font-weight: 500; color: var(--muted); margin-left: 4px; }
+
+  .tabs { display: flex; gap: 4px; margin-bottom: 14px; border-bottom: 1px solid var(--line); }
+  .tab {
+    padding: 9px 14px;
+    border: 0; background: none; color: var(--muted);
+    font: inherit; cursor: pointer;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+  }
+  .tab.active { color: var(--text); border-bottom-color: var(--accent); font-weight: 600; }
+
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    overflow: hidden;
+  }
+  .toolbar {
+    display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+    padding: 12px;
+    border-bottom: 1px solid var(--line);
+    background: var(--panel-2);
+  }
+  .toolbar input[type=search] { width: 220px; }
+  .toolbar select { width: 150px; }
+  .toolbar .spacer { flex: 1; }
+  .bulk { display: none; align-items: center; gap: 8px; color: var(--muted); font-size: 12.5px; }
+  .bulk.on { display: flex; }
+
+  .tablewrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid var(--line); vertical-align: middle; }
+  th {
+    font-size: 11.5px; font-weight: 600; color: var(--muted);
+    text-transform: uppercase; letter-spacing: .04em;
+    background: var(--panel-2);
+    white-space: nowrap;
+  }
+  tbody tr:hover { background: var(--panel-2); }
+  tbody tr:last-child td { border-bottom: 0; }
+  td.name { font-weight: 560; max-width: 260px; }
+  td.addr { font-family: var(--mono); font-size: 12px; color: var(--muted); white-space: nowrap; }
+  td.time { color: var(--muted); font-size: 12px; white-space: nowrap; }
+  .row-actions { display: flex; gap: 6px; justify-content: flex-end; }
+  tr.disabled td.name, tr.disabled td.addr { opacity: .5; }
+
+  .badge {
+    display: inline-block;
+    padding: 1px 7px;
+    border-radius: 999px;
+    font-size: 11.5px;
+    font-weight: 600;
+    background: var(--accent-soft);
+    color: var(--accent);
+    white-space: nowrap;
+  }
+  .badge.t-tuic, .badge.t-hysteria2 { background: #f3e8ff; color: #7e22ce; }
+  .badge.t-vmess { background: #e0f2fe; color: #0369a1; }
+  .badge.t-vless { background: #ecfdf5; color: #047857; }
+  .badge.t-trojan { background: #fef2f2; color: #b91c1c; }
+  .badge.t-shadowsocks { background: #fff7ed; color: #c2410c; }
+  .badge.t-naive { background: #eef2ff; color: #4338ca; }
+  .badge.t-socks, .badge.t-http { background: #f1f5f9; color: #475569; }
+  @media (prefers-color-scheme: dark) {
+    .badge.t-tuic, .badge.t-hysteria2 { background: #2a1a3d; color: #d8b4fe; }
+    .badge.t-vmess { background: #0c2536; color: #7dd3fc; }
+    .badge.t-vless { background: #0f2a22; color: #6ee7b7; }
+    .badge.t-trojan { background: #2b1618; color: #fca5a5; }
+    .badge.t-shadowsocks { background: #2a1e12; color: #fdba74; }
+    .badge.t-naive { background: #1c2140; color: #a5b4fc; }
+    .badge.t-socks, .badge.t-http { background: #1f2530; color: #cbd5e1; }
+  }
+
+  .state { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; user-select: none; }
+  .switch {
+    width: 34px; height: 19px; border-radius: 999px;
+    background: var(--line); position: relative; transition: background .15s;
+    flex: 0 0 auto;
+  }
+  .switch::after {
+    content: ""; position: absolute; top: 2px; left: 2px;
+    width: 15px; height: 15px; border-radius: 50%;
+    background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.25);
+    transition: transform .15s;
+  }
+  .state.on .switch { background: var(--ok); }
+  .state.on .switch::after { transform: translateX(15px); }
+  .state .lbl { font-size: 12px; color: var(--muted); min-width: 24px; }
+
+  .empty { padding: 44px 16px; text-align: center; color: var(--muted); }
+  .empty b { display: block; color: var(--text); margin-bottom: 4px; }
+
+  /* 新增面板 */
+  .drawer {
+    display: none;
+    padding: 14px;
+    border-bottom: 1px solid var(--line);
+    background: var(--panel-2);
+  }
+  .drawer.open { display: block; }
+  .drawer .grid { display: grid; grid-template-columns: 1fr 190px 190px; gap: 10px; margin-bottom: 10px; }
+  .drawer .grid .full { grid-column: 1 / -1; }
+  .drawer .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .hint { color: var(--muted); font-size: 12px; }
+  .result {
+    margin-top: 10px; font-size: 12.5px; line-height: 1.7;
+    border-left: 3px solid var(--ok); padding-left: 10px;
+  }
+  .result .bad-item { color: var(--bad); }
+  .result .title { font-weight: 600; }
+
+  /* 提示条 */
+  #toasts {
+    position: fixed; right: 18px; bottom: 18px; z-index: 60;
+    display: flex; flex-direction: column; gap: 8px; align-items: flex-end;
+  }
+  .toast {
+    padding: 9px 13px; border-radius: 9px; font-size: 13px;
+    background: var(--panel); color: var(--text);
+    border: 1px solid var(--line);
+    box-shadow: var(--shadow);
+    max-width: 380px;
+    animation: slide .18s ease-out;
+  }
+  .toast.err { border-color: var(--bad); color: var(--bad); }
+  .toast.ok { border-color: var(--ok); }
+  @keyframes slide { from { transform: translateY(6px); opacity: 0; } }
+
+  /* 弹窗 */
+  .mask {
+    position: fixed; inset: 0; z-index: 50;
+    background: rgba(9, 12, 16, .42);
+    display: none; place-items: center; padding: 20px;
+    backdrop-filter: blur(2px);
+  }
+  .mask.open { display: grid; }
+  .modal {
+    width: 100%; max-width: 520px;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    box-shadow: var(--shadow);
+    padding: 18px;
+  }
+  .modal h3 { margin: 0 0 14px; font-size: 15px; }
+  .modal .field:last-of-type { margin-bottom: 16px; }
+  .modal .row { display: flex; gap: 8px; justify-content: flex-end; }
+
+  .kv { display: grid; grid-template-columns: 132px 1fr; gap: 8px 14px; font-size: 13px; }
+  .kv .k { color: var(--muted); }
+  .doc { padding: 16px 18px; font-size: 13px; line-height: 1.85; }
+  .doc h4 { margin: 18px 0 6px; font-size: 13.5px; }
+  .doc h4:first-child { margin-top: 0; }
+  .doc code { background: var(--panel-2); padding: 1px 5px; border-radius: 5px; border: 1px solid var(--line); }
+  .doc pre {
+    background: var(--panel-2); border: 1px solid var(--line); border-radius: 9px;
+    padding: 11px 13px; overflow-x: auto; font-family: var(--mono); font-size: 12px;
+    line-height: 1.6; margin: 8px 0;
+  }
+  @media (max-width: 720px) {
+    header.top { padding: 10px 14px; gap: 8px; }
+    header.top .meta { display: none; }
+    main { padding: 14px; }
+    .drawer .grid { grid-template-columns: 1fr; }
+    .toolbar input[type=search] { width: 100%; }
+    td.hide-sm, th.hide-sm { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ============ 登录 ============ -->
+<div id="login">
+  <form class="login-card" id="loginForm" autocomplete="on">
+    <div class="brand"><span class="logo">R</span> RekoBox 节点控制台</div>
+    <h1>管理员登录</h1>
+    <p class="sub">账号由服务器 CLI 创建，角色必须是 admin。</p>
+    <div class="field">
+      <label for="fServer">服务器地址</label>
+      <input id="fServer" type="text" spellcheck="false">
+    </div>
+    <div class="field">
+      <label for="fUser">管理员账号</label>
+      <input id="fUser" type="text" spellcheck="false" autocomplete="username" placeholder="admin">
+    </div>
+    <div class="field">
+      <label for="fPass">口令</label>
+      <input id="fPass" type="password" autocomplete="current-password" placeholder="••••••••">
+    </div>
+    <label class="hint" style="display:flex;gap:7px;align-items:center;margin:6px 0 2px;">
+      <input id="fRemember" type="checkbox" checked style="width:auto"> 记住登录状态（令牌存本机浏览器）
+    </label>
+    <button class="btn btn-primary btn-block" id="btnLogin" type="submit">登录</button>
+    <div class="err" id="loginErr"></div>
+  </form>
+</div>
+
+<!-- ============ 控制台 ============ -->
+<div id="app">
+  <header class="top">
+    <div class="brand"><span class="logo">R</span> RekoBox</div>
+    <span class="meta" id="topMeta"><span class="dot"></span>连接中…</span>
+    <div class="spacer"></div>
+    <span class="meta" id="topUser"></span>
+    <button class="btn btn-sm" id="btnRefresh">刷新</button>
+    <button class="btn btn-sm" id="btnLogout">退出</button>
+  </header>
+
+  <main>
+    <div class="cards">
+      <div class="card"><div class="k">节点总数</div><div class="v" id="statTotal">–</div></div>
+      <div class="card"><div class="k">已启用</div><div class="v" id="statEnabled">–</div></div>
+      <div class="card"><div class="k">账号数</div><div class="v" id="statUsers">–</div></div>
+      <div class="card"><div class="k">节点池版本</div><div class="v" id="statVersion">–<small id="statUpdated"></small></div></div>
+    </div>
+
+    <div class="tabs">
+      <button class="tab active" data-tab="nodes">节点管理</button>
+      <button class="tab" data-tab="users">账号管理</button>
+      <button class="tab" data-tab="doc">接入说明</button>
+    </div>
+
+    <!-- 节点 -->
+    <section class="panel" id="tab-nodes">
+      <div class="toolbar">
+        <input type="search" id="searchInput" placeholder="搜索名称 / 地址 / 分组 / 备注">
+        <select id="groupFilter"><option value="">全部分组</option></select>
+        <select id="stateFilter">
+          <option value="">全部状态</option>
+          <option value="on">仅启用</option>
+          <option value="off">仅禁用</option>
+        </select>
+        <div class="spacer"></div>
+        <div class="bulk" id="bulkBar">
+          <span id="bulkCount">已选 0 项</span>
+          <button class="btn btn-sm" data-bulk="enable">启用</button>
+          <button class="btn btn-sm" data-bulk="disable">禁用</button>
+          <button class="btn btn-sm btn-danger" data-bulk="delete">删除</button>
+        </div>
+        <button class="btn btn-sm btn-primary" id="btnAddToggle">＋ 添加节点</button>
+      </div>
+
+      <div class="drawer" id="addDrawer">
+        <div class="grid">
+          <div class="full">
+            <label class="hint" style="display:block;margin-bottom:6px;">
+              节点链接，一行一条（tuic:// / vless:// / vmess:// / trojan:// / ss:// / hysteria2:// / socks5:// / http:// / naive+https://）
+            </label>
+            <textarea id="addLinks" placeholder="tuic://uuid:password@1.2.3.4:25247?congestion_control=bbr&alpn=h3&sni=www.bing.com&udp_relay_mode=native&allow_insecure=1#香港三网优化-限速50Mbps"></textarea>
+          </div>
+          <div>
+            <label class="hint" style="display:block;margin-bottom:6px;">分组（可选）</label>
+            <input type="text" id="addGroup" list="groupList" placeholder="例如 香港 / 日本 / 默认">
+            <datalist id="groupList"></datalist>
+          </div>
+          <div>
+            <label class="hint" style="display:block;margin-bottom:6px;">备注（可选）</label>
+            <input type="text" id="addRemark" placeholder="例如 限速 50Mbps / 到期 12-31">
+          </div>
+        </div>
+        <div class="row">
+          <button class="btn btn-primary" id="btnAdd">添加到节点池</button>
+          <button class="btn" id="btnAddClose">收起</button>
+          <span class="hint">链接里的 <code>#名称</code> 会被用作节点名；重复链接会被拒绝。</span>
+        </div>
+        <div class="result" id="addResult" style="display:none"></div>
+      </div>
+
+      <div class="tablewrap">
+        <table>
+          <thead>
+            <tr>
+              <th style="width:34px;"><input type="checkbox" id="checkAll" style="width:auto"></th>
+              <th style="width:52px;">顺序</th>
+              <th>名称</th>
+              <th style="width:96px;">类型</th>
+              <th>地址</th>
+              <th class="hide-sm" style="width:92px;">分组</th>
+              <th class="hide-sm">备注</th>
+              <th style="width:92px;">状态</th>
+              <th class="hide-sm" style="width:120px;">更新时间</th>
+              <th style="width:150px;"></th>
+            </tr>
+          </thead>
+          <tbody id="nodeBody"></tbody>
+        </table>
+      </div>
+      <div class="empty" id="nodeEmpty" style="display:none">
+        <b>节点池是空的</b>
+        点右上角「添加节点」，粘贴节点链接即可下发到所有客户端。
+      </div>
+    </section>
+
+    <!-- 账号 -->
+    <section class="panel" id="tab-users" style="display:none">
+      <div class="toolbar">
+        <input type="text" id="newUserName" placeholder="新账号（小写字母/数字/_-., 2-32 位）" style="width:280px">
+        <input type="password" id="newUserPass" placeholder="口令（至少 6 位）" style="width:180px">
+        <select id="newUserRole" style="width:130px">
+          <option value="user">普通用户</option>
+          <option value="admin">管理员</option>
+        </select>
+        <button class="btn btn-primary btn-sm" id="btnCreateUser">创建账号</button>
+        <div class="spacer"></div>
+        <span class="hint">普通用户只能拉取节点，不能上传</span>
+      </div>
+      <div class="tablewrap">
+        <table>
+          <thead>
+            <tr>
+              <th>账号</th>
+              <th style="width:92px;">角色</th>
+              <th style="width:84px;">状态</th>
+              <th style="width:96px;">在线设备</th>
+              <th style="width:140px;">最后活动</th>
+              <th style="width:120px;">创建时间</th>
+              <th style="width:190px;"></th>
+            </tr>
+          </thead>
+          <tbody id="userBody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- 说明 -->
+    <section class="panel" id="tab-doc" style="display:none">
+      <div class="doc">
+        <h4>客户端怎么用</h4>
+        Windows 客户端：顶栏「首选项」→「账号与节点订阅」→ 填服务器地址、账号、口令 → 登录。
+        登录后自动拉一次节点；之后每次启动、每 30 分钟、以及手动点「立即拉取」时更新。
+        <h4>只读模型</h4>
+        客户端登录后只有一个数据入口 <code>GET /api/v1/nodes</code>。
+        服务端不存在任何客户端上传接口，<code>PUT /api/v1/vault</code> 一律返回 403。
+        因此任何一个用户都无法改动别人看到的节点列表。
+        <h4>新增节点</h4>
+        直接把机场/自建的分享链接粘进来，一行一条。支持的协议：
+        <code>vmess</code> <code>vless</code> <code>trojan</code> <code>ss</code>
+        <code>socks5</code> <code>http</code> <code>tuic</code> <code>hysteria2</code> <code>naive+https</code>。
+        禁用节点不会下发；删除节点后，客户端下次拉取会把它从本地移除。
+        <h4>命令行</h4>
+        <pre>rekosync -addadmin root -password '...'   # 建管理员
+rekosync -adduser  alice -password '...'  # 建普通账号
+rekosync -users                           # 列账号
+rekosync -passwd alice                    # 改口令（踢掉旧令牌）
+rekosync -disable alice / -enable alice   # 禁用 / 启用</pre>
+        <h4>接口一览</h4>
+        <div class="kv">
+          <div class="k"><code>POST /api/v1/auth/login</code></div><div>{username, password, device} → {token, user.role}</div>
+          <div class="k"><code>GET /api/v1/nodes</code></div><div>已登录账号：启用中的节点（只读）</div>
+          <div class="k"><code>GET /api/v1/admin/nodes</code></div><div>管理员：全量节点（含禁用）</div>
+          <div class="k"><code>POST /api/v1/admin/nodes</code></div><div>管理员：{links, group, remark} 批量录入</div>
+          <div class="k"><code>PATCH /api/v1/admin/nodes/{id}</code></div><div>管理员：改名/分组/备注/启用/换链接</div>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<div id="toasts"></div>
+
+<!-- 编辑节点 -->
+<div class="mask" id="editMask">
+  <form class="modal" id="editForm">
+    <h3>编辑节点</h3>
+    <div class="field">
+      <label>名称</label>
+      <input type="text" id="editName">
+    </div>
+    <div class="field">
+      <label>分组</label>
+      <input type="text" id="editGroup" list="groupList">
+    </div>
+    <div class="field">
+      <label>备注</label>
+      <input type="text" id="editRemark">
+    </div>
+    <div class="field">
+      <label>节点链接</label>
+      <textarea id="editLink" spellcheck="false"></textarea>
+    </div>
+    <div class="row">
+      <button type="button" class="btn" id="btnEditCancel">取消</button>
+      <button type="submit" class="btn btn-primary">保存</button>
+    </div>
+  </form>
+</div>
+
+<!-- 重置口令 -->
+<div class="mask" id="passMask">
+  <form class="modal" id="passForm" style="max-width:400px">
+    <h3>重置口令</h3>
+    <div class="field">
+      <label id="passFor"></label>
+      <input type="password" id="passNew" placeholder="新口令（至少 6 位）" autocomplete="new-password">
+    </div>
+    <div class="row">
+      <button type="button" class="btn" id="btnPassCancel">取消</button>
+      <button type="submit" class="btn btn-primary">确认</button>
+    </div>
+  </form>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  const KEY = "rekobox.admin.session";
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+  }[c]));
+
+  const state = {
+    server: "",
+    token: "",
+    me: null,
+    nodes: [],
+    users: [],
+    selected: new Set(),
+    tab: "nodes",
+    filter: { q: "", group: "", state: "" },
+    overview: null,
+    editing: null,
+    passTarget: null,
+    timer: 0,
+  };
+
+  // ---------- 基础 ----------
+  function toast(msg, kind) {
+    const el = document.createElement("div");
+    el.className = "toast" + (kind ? " " + kind : "");
+    el.textContent = msg;
+    $("toasts").appendChild(el);
+    setTimeout(() => el.remove(), kind === "err" ? 5200 : 2600);
+  }
+
+  function saveSession() {
+    try {
+      localStorage.setItem(KEY, JSON.stringify({
+        server: state.server, token: state.token, name: state.me && state.me.name,
+      }));
+    } catch (_) { /* 隐私模式忽略 */ }
+  }
+
+  function loadSession() {
+    try {
+      const raw = localStorage.getItem(KEY);
+      if (!raw) return null;
+      const s = JSON.parse(raw);
+      if (!s.token || !s.server) return null;
+      return s;
+    } catch (_) { return null; }
+  }
+
+  function clearSession() {
+    try { localStorage.removeItem(KEY); } catch (_) {}
+  }
+
+  async function api(path, opts) {
+    opts = opts || {};
+    const res = await fetch(state.server + path, {
+      method: opts.method || "GET",
+      headers: Object.assign({
+        "Authorization": "Bearer " + state.token,
+        "Content-Type": "application/json",
+      }, opts.headers || {}),
+      body: opts.body === undefined ? undefined : JSON.stringify(opts.body),
+    });
+    let data = null;
+    const text = await res.text();
+    if (text) {
+      try { data = JSON.parse(text); } catch (_) { data = { raw: text }; }
+    }
+    if (!res.ok) {
+      if (res.status === 401) {
+        doLogout(true);
+        throw new Error("登录已失效，请重新登录");
+      }
+      const msg = (data && data.error && data.error.message) || ("请求失败（HTTP " + res.status + "）");
+      throw new Error(msg);
+    }
+    return data || {};
+  }
+
+  // ---------- 登录 ----------
+  function showLogin(err) {
+    $("app").style.display = "none";
+    $("login").style.display = "grid";
+    $("fServer").value = state.server || location.origin;
+    $("loginErr").style.display = err ? "block" : "none";
+    $("loginErr").textContent = err || "";
+    $("btnLogin").disabled = false;
+    $("btnLogin").textContent = "登录";
+    if (state.timer) { clearInterval(state.timer); state.timer = 0; }
+  }
+
+  function normServer(v) {
+    let s = String(v || "").trim();
+    if (!s) return "";
+    if (!/^https?:\/\//i.test(s)) s = "http://" + s;
+    return s.replace(/\/+$/, "").replace(/\/api\/v1$/i, "");
+  }
+
+  $("loginForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const server = normServer($("fServer").value);
+    const user = $("fUser").value.trim();
+    const pass = $("fPass").value;
+    if (!server || !user || !pass) {
+      $("loginErr").style.display = "block";
+      $("loginErr").textContent = "请填写服务器地址、账号与口令";
+      return;
+    }
+    $("btnLogin").disabled = true;
+    $("btnLogin").textContent = "登录中…";
+    state.server = server;
+    try {
+      const r = await fetch(server + "/api/v1/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username: user, password: pass, device: "web-admin" }),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error((data.error && data.error.message) || ("登录失败（HTTP " + r.status + "）"));
+      const role = (data.user && data.user.role) || "user";
+      if (role !== "admin") throw new Error("该账号不是管理员，无法进入控制台");
+      state.token = data.token;
+      state.me = data.user;
+      if ($("fRemember").checked) saveSession();
+      else { try { localStorage.removeItem(KEY); } catch (_) {} }
+      $("fPass").value = "";
+      await enterApp();
+    } catch (err) {
+      const msg = String(err && err.message || err);
+      showLogin(msg.includes("Failed to fetch") || msg.includes("NetworkError")
+        ? "连不上服务器：检查地址、端口与是否已启动 rekosync" : msg);
+    }
+  });
+
+  async function enterApp() {
+    $("login").style.display = "none";
+    $("app").style.display = "block";
+    $("topUser").textContent = (state.me ? state.me.name : "") + " · 管理员";
+    await refreshAll();
+    if (state.timer) clearInterval(state.timer);
+    state.timer = setInterval(() => {
+      if (state.tab === "nodes" && !$("editMask").classList.contains("open")) {
+        refreshAll(true).catch(() => {});
+      }
+    }, 20000);
+  }
+
+  function doLogout(silent) {
+    if (!silent && state.token) {
+      api("/api/v1/auth/logout", { method: "POST", body: {} }).catch(() => {});
+    }
+    clearSession();
+    state.token = "";
+    state.nodes = [];
+    state.users = [];
+    state.selected.clear();
+    if (!silent) toast("已退出");
+    showLogin(silent ? "登录已失效，请重新登录" : "");
+  }
+
+  $("btnLogout").addEventListener("click", () => doLogout(false));
+
+  // ---------- 数据 ----------
+  async function refreshAll(quiet) {
+    const [ov, nd, us] = await Promise.all([
+      api("/api/v1/admin/overview"),
+      api("/api/v1/admin/nodes"),
+      api("/api/v1/admin/users"),
+    ]);
+    state.overview = ov;
+    state.nodes = nd.nodes || [];
+    const aliveIds = new Set(state.nodes.map((n) => n.id));
+    Array.from(state.selected).forEach((id) => { if (!aliveIds.has(id)) state.selected.delete(id); });
+    state.users = us.users || [];
+    renderOverview();
+    renderNodes();
+    renderUsers();
+    if (!quiet) toast("已刷新", "ok");
+  }
+
+  $("btnRefresh").addEventListener("click", () => {
+    refreshAll().catch((e) => toast(e.message, "err"));
+  });
+
+  function fmtTime(ms) {
+    if (!ms) return "—";
+    const d = new Date(ms);
+    const p = (n) => String(n).padStart(2, "0");
+    return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate()) +
+      " " + p(d.getHours()) + ":" + p(d.getMinutes());
+  }
+
+  function ago(ms) {
+    if (!ms) return "—";
+    const s = Math.max(0, Math.floor((Date.now() - ms) / 1000));
+    if (s < 60) return "刚刚";
+    if (s < 3600) return Math.floor(s / 60) + " 分钟前";
+    if (s < 86400) return Math.floor(s / 3600) + " 小时前";
+    return Math.floor(s / 86400) + " 天前";
+  }
+
+  function renderOverview() {
+    const ov = state.overview || {};
+    const n = ov.nodes || {};
+    const s = ov.server || {};
+    $("statTotal").textContent = n.total == null ? "–" : n.total;
+    $("statEnabled").textContent = n.enabled == null ? "–" : n.enabled;
+    $("statUsers").textContent = (ov.users && ov.users.total) || 0;
+    $("statVersion").innerHTML = esc(n.version == null ? "–" : n.version) +
+      '<small>' + esc(n.updated_at ? fmtTime(n.updated_at) : "") + "</small>";
+    $("topMeta").innerHTML = '<span class="dot"></span>' +
+      esc(state.server.replace(/^https?:\/\//, "")) + " · v" + esc(s.version || "?") +
+      " · 运行 " + esc(fmtUptime(s.uptime_sec));
+  }
+
+  function fmtUptime(sec) {
+    sec = Math.floor(sec || 0);
+    if (sec < 60) return sec + " 秒";
+    if (sec < 3600) return Math.floor(sec / 60) + " 分钟";
+    if (sec < 86400) return Math.floor(sec / 3600) + " 小时";
+    return Math.floor(sec / 86400) + " 天";
+  }
+
+  function visibleNodes() {
+    const q = state.filter.q.toLowerCase();
+    return state.nodes.filter((n) => {
+      if (state.filter.group && (n.group || "") !== state.filter.group) return false;
+      if (state.filter.state === "on" && !n.enabled) return false;
+      if (state.filter.state === "off" && n.enabled) return false;
+      if (!q) return true;
+      return [n.name, n.addr, n.group, n.remark, n.type, String(n.port)]
+        .join(" ").toLowerCase().includes(q);
+    });
+  }
+
+  function renderNodeGroups() {
+    const groups = Array.from(new Set(state.nodes.map((n) => n.group || "").filter(Boolean))).sort();
+    const sel = $("groupFilter");
+    const cur = state.filter.group;
+    sel.innerHTML = '<option value="">全部分组</option>' +
+      groups.map((g) => '<option value="' + esc(g) + '"' + (g === cur ? " selected" : "") + ">" + esc(g) + "</option>").join("");
+    $("groupList").innerHTML = groups.map((g) => '<option value="' + esc(g) + '">').join("");
+  }
+
+  function renderNodes() {
+    renderNodeGroups();
+    const list = visibleNodes();
+    const body = $("nodeBody");
+    body.innerHTML = list.map((n) => {
+      const checked = state.selected.has(n.id) ? " checked" : "";
+      return '<tr class="' + (n.enabled ? "" : "disabled") + '" data-id="' + esc(n.id) + '">' +
+        '<td><input type="checkbox" class="rowcheck" style="width:auto"' + checked + '></td>' +
+        '<td class="time">' +
+          '<button class="btn btn-sm" data-act="up" title="上移" style="padding:2px 6px">↑</button> ' +
+          '<button class="btn btn-sm" data-act="down" title="下移" style="padding:2px 6px">↓</button>' +
+        "</td>" +
+        '<td class="name">' + esc(n.name) + "</td>" +
+        '<td><span class="badge t-' + esc(n.type) + '">' + esc(n.type) + "</span></td>" +
+        '<td class="addr">' + esc(n.addr) + ":" + esc(n.port) + "</td>" +
+        '<td class="hide-sm">' + (n.group ? esc(n.group) : '<span style="color:var(--muted)">—</span>') + "</td>" +
+        '<td class="hide-sm" style="color:var(--muted);font-size:12px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' +
+          (n.remark ? esc(n.remark) : "—") + "</td>" +
+        '<td><span class="state ' + (n.enabled ? "on" : "") + '" data-act="toggle">' +
+          '<span class="switch"></span><span class="lbl">' + (n.enabled ? "启用" : "停用") + "</span></span></td>" +
+        '<td class="time hide-sm">' + esc(fmtTime(n.updated_at || n.created_at)) + "</td>" +
+        '<td><div class="row-actions">' +
+          '<button class="btn btn-sm" data-act="edit">编辑</button>' +
+          '<button class="btn btn-sm" data-act="copy">复制</button>' +
+          '<button class="btn btn-sm btn-danger" data-act="del">删除</button>' +
+        "</div></td>" +
+      "</tr>";
+    }).join("");
+
+    $("nodeEmpty").style.display = state.nodes.length ? "none" : "block";
+    if (state.nodes.length && !list.length) {
+      $("nodeEmpty").style.display = "block";
+      $("nodeEmpty").innerHTML = "<b>没有匹配的节点</b>换个关键词或清空筛选条件。";
+    } else if (state.nodes.length) {
+      $("nodeEmpty").innerHTML = "<b>节点池是空的</b>点右上角「添加节点」，粘贴节点链接即可下发到所有客户端。";
+    }
+    updateBulk();
+  }
+
+  function updateBulk() {
+    const count = state.selected.size;
+    $("bulkBar").classList.toggle("on", count > 0);
+    $("bulkCount").textContent = "已选 " + count + " 项";
+    $("checkAll").checked = count > 0 && count === visibleNodes().length;
+  }
+
+  function nodeById(id) { return state.nodes.find((n) => n.id === id); }
+
+  $("nodeBody").addEventListener("click", async (e) => {
+    const btn = e.target.closest("[data-act]");
+    const tr = e.target.closest("tr");
+    if (!btn || !tr) return;
+    const id = tr.dataset.id;
+    const n = nodeById(id);
+    if (!n) return;
+    const act = btn.dataset.act;
+    try {
+      if (act === "toggle") {
+        await api("/api/v1/admin/nodes/" + id, { method: "PATCH", body: { enabled: !n.enabled } });
+        n.enabled = !n.enabled;
+        toast(n.enabled ? "已启用：" + n.name : "已停用：" + n.name, "ok");
+        await refreshAll(true);
+      } else if (act === "del") {
+        if (!confirm("确定删除「" + n.name + "」？客户端下次拉取后会同步移除。")) return;
+        await api("/api/v1/admin/nodes/" + id, { method: "DELETE" });
+        state.nodes = state.nodes.filter((x) => x.id !== id);
+        state.selected.delete(id);
+        renderNodes();
+        await refreshAll(true);
+        toast("已删除：" + n.name, "ok");
+      } else if (act === "copy") {
+        try {
+          await navigator.clipboard.writeText(n.link);
+          toast("链接已复制", "ok");
+        } catch (_) {
+          prompt("复制链接：", n.link);
+        }
+      } else if (act === "edit") {
+        state.editing = id;
+        $("editName").value = n.name || "";
+        $("editGroup").value = n.group || "";
+        $("editRemark").value = n.remark || "";
+        $("editLink").value = n.link || "";
+        $("editMask").classList.add("open");
+      } else if (act === "up" || act === "down") {
+        await moveNode(id, act === "up" ? -1 : 1);
+      }
+    } catch (err) {
+      toast(err.message, "err");
+    }
+  });
+
+  $("nodeBody").addEventListener("change", (e) => {
+    if (!e.target.classList.contains("rowcheck")) return;
+    const id = e.target.closest("tr").dataset.id;
+    if (e.target.checked) state.selected.add(id); else state.selected.delete(id);
+    updateBulk();
+  });
+
+  $("checkAll").addEventListener("change", (e) => {
+    state.selected.clear();
+    if (e.target.checked) visibleNodes().forEach((n) => state.selected.add(n.id));
+    renderNodes();
+  });
+
+  async function moveNode(id, delta) {
+    const order = state.nodes.map((n) => n.id);
+    const i = order.indexOf(id);
+    const j = i + delta;
+    if (i < 0 || j < 0 || j >= order.length) return;
+    order.splice(j, 0, order.splice(i, 1)[0]);
+    await api("/api/v1/admin/nodes/order", { method: "POST", body: { ids: order } });
+    const map = new Map(state.nodes.map((n) => [n.id, n]));
+    state.nodes = order.map((oid) => map.get(oid)).filter(Boolean);
+    renderNodes();
+  }
+
+  document.querySelectorAll("[data-bulk]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const action = btn.dataset.bulk;
+      const ids = Array.from(state.selected);
+      if (!ids.length) return;
+      if (action === "delete" && !confirm("确定删除选中的 " + ids.length + " 个节点？")) return;
+      try {
+        await api("/api/v1/admin/nodes/batch", { method: "POST", body: { ids, action } });
+        state.selected.clear();
+        await refreshAll(true);
+        toast((action === "delete" ? "已删除 " : action === "disable" ? "已停用 " : "已启用 ") + ids.length + " 个节点", "ok");
+      } catch (err) {
+        toast(err.message, "err");
+      }
+    });
+  });
+
+  // ---------- 添加节点 ----------
+  $("btnAddToggle").addEventListener("click", () => {
+    $("addDrawer").classList.toggle("open");
+    if ($("addDrawer").classList.contains("open")) $("addLinks").focus();
+  });
+  $("btnAddClose").addEventListener("click", () => $("addDrawer").classList.remove("open"));
+
+  $("btnAdd").addEventListener("click", async () => {
+    const links = $("addLinks").value.trim();
+    if (!links) { toast("先粘贴节点链接", "err"); return; }
+    $("btnAdd").disabled = true;
+    try {
+      const r = await api("/api/v1/admin/nodes", {
+        method: "POST",
+        body: { links, group: $("addGroup").value.trim(), remark: $("addRemark").value.trim() },
+      });
+      const added = r.added || [];
+      const rejected = r.rejected || [];
+      let html = "";
+      if (added.length) {
+        html += '<div class="title">已添加 ' + added.length + " 条</div>";
+        html += added.map((n) => "· " + esc(n.name) + "（" + esc(n.type) + " " + esc(n.addr) + ":" + esc(n.port) + "）").join("<br>");
+      }
+      if (rejected.length) {
+        html += '<div class="title" style="color:var(--bad);margin-top:6px">跳过 ' + rejected.length + " 条</div>";
+        html += rejected.map((x) => '<div class="bad-item">· ' + esc(x.reason) + "<br><span class='mono' style='opacity:.7'>" +
+          esc(x.link.slice(0, 90)) + (x.link.length > 90 ? "…" : "") + "</span></div>").join("");
+      }
+      const box = $("addResult");
+      box.style.display = "block";
+      box.innerHTML = html || "没有可添加的链接";
+      box.style.borderLeftColor = added.length ? "var(--ok)" : "var(--bad)";
+      if (added.length) {
+        $("addLinks").value = "";
+        await refreshAll(true);
+        toast("已添加 " + added.length + " 条节点", "ok");
+      }
+      if (rejected.length && !added.length) toast("全部被拒绝，看下方原因", "err");
+    } catch (err) {
+      toast(err.message, "err");
+    } finally {
+      $("btnAdd").disabled = false;
+    }
+  });
+
+  // ---------- 编辑弹窗 ----------
+  $("btnEditCancel").addEventListener("click", () => $("editMask").classList.remove("open"));
+  $("editMask").addEventListener("click", (e) => { if (e.target === $("editMask")) $("editMask").classList.remove("open"); });
+  $("editForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const id = state.editing;
+    if (!id) return;
+    const body = {
+      name: $("editName").value.trim(),
+      group: $("editGroup").value.trim(),
+      remark: $("editRemark").value.trim(),
+      link: $("editLink").value.trim(),
+    };
+    try {
+      await api("/api/v1/admin/nodes/" + id, { method: "PATCH", body });
+      $("editMask").classList.remove("open");
+      await refreshAll(true);
+      toast("已保存", "ok");
+    } catch (err) {
+      toast(err.message, "err");
+    }
+  });
+
+  // ---------- 账号 ----------
+  function renderUsers() {
+    $("userBody").innerHTML = state.users.map((u) => {
+      const isMe = state.me && state.me.name === u.name;
+      return "<tr>" +
+        '<td class="name">' + esc(u.name) + (isMe ? ' <span class="hint">（当前）</span>' : "") + "</td>" +
+        '<td>' + (u.role === "admin" ? '<span class="badge">管理员</span>' : "普通用户") + "</td>" +
+        '<td><span style="color:' + (u.disabled ? "var(--bad)" : "var(--ok)") + '">' + (u.disabled ? "已禁用" : "正常") + "</span></td>" +
+        '<td class="time">' + (u.sessions || 0) + "</td>" +
+        '<td class="time">' + esc(ago(u.last_used)) + "</td>" +
+        '<td class="time">' + esc(fmtTime(u.created_at)) + "</td>" +
+        '<td><div class="row-actions">' +
+          '<button class="btn btn-sm" data-uact="pass" data-name="' + esc(u.name) + '">改口令</button>' +
+          (isMe ? "" :
+            '<button class="btn btn-sm" data-uact="state" data-name="' + esc(u.name) + '" data-disabled="' + (u.disabled ? "1" : "0") + '">' +
+            (u.disabled ? "启用" : "禁用") + "</button>" +
+            '<button class="btn btn-sm btn-danger" data-uact="del" data-name="' + esc(u.name) + '">删除</button>') +
+        "</div></td>" +
+      "</tr>";
+    }).join("");
+  }
+
+  $("btnCreateUser").addEventListener("click", async () => {
+    const name = $("newUserName").value.trim();
+    const password = $("newUserPass").value;
+    if (!name || !password) { toast("填写账号与口令", "err"); return; }
+    try {
+      await api("/api/v1/admin/users", { method: "POST", body: { name, password, role: $("newUserRole").value } });
+      $("newUserName").value = "";
+      $("newUserPass").value = "";
+      await refreshAll(true);
+      toast("账号已创建", "ok");
+    } catch (err) {
+      toast(err.message, "err");
+    }
+  });
+
+  $("userBody").addEventListener("click", async (e) => {
+    const btn = e.target.closest("[data-uact]");
+    if (!btn) return;
+    const name = btn.dataset.name;
+    try {
+      if (btn.dataset.uact === "pass") {
+        state.passTarget = name;
+        $("passFor").textContent = "为 " + name + " 设置新口令";
+        $("passNew").value = "";
+        $("passMask").classList.add("open");
+        $("passNew").focus();
+      } else if (btn.dataset.uact === "state") {
+        const disable = btn.dataset.disabled === "0";
+        await api("/api/v1/admin/users/" + encodeURIComponent(name) + "/state", {
+          method: "POST", body: { disabled: disable },
+        });
+        await refreshAll(true);
+        toast(disable ? "已禁用 " + name + "，其令牌已吊销" : "已启用 " + name, "ok");
+      } else if (btn.dataset.uact === "del") {
+        if (!confirm("删除账号 " + name + "？其令牌会立即失效。")) return;
+        await api("/api/v1/admin/users/" + encodeURIComponent(name), { method: "DELETE" });
+        await refreshAll(true);
+        toast("已删除 " + name, "ok");
+      }
+    } catch (err) {
+      toast(err.message, "err");
+    }
+  });
+
+  $("btnPassCancel").addEventListener("click", () => $("passMask").classList.remove("open"));
+  $("passMask").addEventListener("click", (e) => { if (e.target === $("passMask")) $("passMask").classList.remove("open"); });
+  $("passForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const name = state.passTarget;
+    const pwd = $("passNew").value;
+    if (!name || pwd.length < 6) { toast("口令至少 6 位", "err"); return; }
+    try {
+      await api("/api/v1/admin/users/" + encodeURIComponent(name) + "/password", {
+        method: "POST", body: { password: pwd },
+      });
+      $("passMask").classList.remove("open");
+      toast(name + " 的口令已更新，旧令牌已吊销", "ok");
+    } catch (err) {
+      toast(err.message, "err");
+    }
+  });
+
+  // ---------- 筛选 / 标签页 ----------
+  $("searchInput").addEventListener("input", (e) => {
+    state.filter.q = e.target.value.trim();
+    renderNodes();
+  });
+  $("groupFilter").addEventListener("change", (e) => {
+    state.filter.group = e.target.value;
+    renderNodes();
+  });
+  $("stateFilter").addEventListener("change", (e) => {
+    state.filter.state = e.target.value;
+    renderNodes();
+  });
+
+  document.querySelectorAll(".tab").forEach((t) => {
+    t.addEventListener("click", () => {
+      document.querySelectorAll(".tab").forEach((x) => x.classList.toggle("active", x === t));
+      state.tab = t.dataset.tab;
+      $("tab-nodes").style.display = state.tab === "nodes" ? "" : "none";
+      $("tab-users").style.display = state.tab === "users" ? "" : "none";
+      $("tab-doc").style.display = state.tab === "doc" ? "" : "none";
+      if (state.tab !== "nodes") $("addDrawer").classList.remove("open");
+    });
+  });
+
+  // ---------- 启动 ----------
+  const saved = loadSession();
+  if (saved) {
+    state.server = saved.server;
+    state.token = saved.token;
+    api("/api/v1/auth/me").then((r) => {
+      if (!r.user || r.user.role !== "admin") throw new Error("该账号不是管理员");
+      state.me = r.user;
+      enterApp().catch((e) => showLogin(e.message));
+    }).catch(() => {
+      state.token = "";
+      clearSession();
+      showLogin();
+    });
+  } else {
+    showLogin();
+  }
+})();
+</script>
+</body>
+</html>

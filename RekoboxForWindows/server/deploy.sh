@@ -63,7 +63,7 @@ usage() {
       --listen ADDR    监听地址，默认 :<端口>（只给 nginx 反代就写 127.0.0.1:<端口>）
       --port N         服务端口，默认 8080；等价于 --listen :N
       --dir PATH       安装目录，默认 /opt/rekosync
-      --account NAME   同步账号名，默认 alice
+      --account NAME   管理员账号名，默认 alice（登录网页控制台用）
       --password PASS  账号口令；不填则交互输入，留空自动生成随机口令
                      传 - 表示从标准输入读一行（远程部署时用，口令不进命令行）
       --no-account     跳过建号（只装服务）
@@ -355,7 +355,7 @@ fi
 step "5/6 安装服务"
 
 if [ "$CREATE_ACCOUNT" = 1 ] && [ "$PASSWORD_SET" = 0 ] && have_tty && [ "$ASSUME_YES" = 0 ]; then
-  ask "同步账号名（小写字母/数字，2-32 位）" "$ACCOUNT" ACCOUNT
+  ask "管理员账号名（小写字母/数字，2-32 位）" "$ACCOUNT" ACCOUNT
   read -r -s -p "账号口令（至少 6 位，直接回车自动生成）: " PASSWORD || true
   echo
   if [ -n "$PASSWORD" ]; then PASSWORD_SET=1; fi
@@ -404,9 +404,9 @@ if [ "$CREATE_ACCOUNT" = 1 ]; then
     fi
   fi
   ADD_RC=0
-  ADD_OUT="$(printf '%s\n' "$PASSWORD" | "$INSTALL_DIR/rekosync" -data "$INSTALL_DIR/data" -adduser "$ACCOUNT" 2>&1)" || ADD_RC=$?
+  ADD_OUT="$(printf '%s\n' "$PASSWORD" | "$INSTALL_DIR/rekosync" -data "$INSTALL_DIR/data" -addadmin "$ACCOUNT" 2>&1)" || ADD_RC=$?
   if [ "$ADD_RC" = 0 ]; then
-    note "已创建账号 $ACCOUNT"
+    note "已创建管理员账号 $ACCOUNT"
   elif printf '%s' "$ADD_OUT" | grep -qiE "exist|已存在"; then
     note "账号 $ACCOUNT 已存在，跳过（口令未改动；要改口令加 --reset-password）"
   else
@@ -509,7 +509,8 @@ cat <<EOF
 ──────────────── 安装完成 ────────────────
   服务      systemctl status rekosync --no-pager
   日志      journalctl -u rekosync -f
-  数据      $INSTALL_DIR/data（账号/令牌/节点快照，备份就 tar 这个目录）
+  网页控制台  http://$PUB_IP:$FW_PORT/admin（用下面的管理员账号登录）
+  数据      $INSTALL_DIR/data（账号/令牌/节点池，备份就 tar 这个目录）
   客户端填  http://$PUB_IP:$FW_PORT
 EOF
 

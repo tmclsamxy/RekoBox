@@ -3,7 +3,6 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
-#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QSysInfo>
@@ -12,7 +11,7 @@ namespace NekoGui_sync {
 
     namespace {
         constexpr auto kStateFile = "sync/state.json";
-        constexpr auto kMetaFile = "sync/meta.json";
+        constexpr auto kNodesFile = "sync/nodes.json";
 
         QJsonObject ReadObject(const QString &path) {
             QFile f(path);
@@ -24,7 +23,7 @@ namespace NekoGui_sync {
 
         bool WriteObject(const QString &path, const QJsonObject &obj) {
             QDir().mkpath(QFileInfo(path).absolutePath());
-            // 先写临时文件再改名：同步过程中断电不会留下半截 JSON
+            // 先写临时文件再改名：过程中断电不会留下半截 JSON
             const auto tmp = path + ".tmp";
             {
                 QFile f(tmp);
@@ -43,36 +42,29 @@ namespace NekoGui_sync {
         server = s.value("server").toString();
         username = s.value("username").toString();
         token = s.value("token").toString();
+        role = s.value("role").toString();
         deviceId = s.value("device_id").toString();
         deviceName = s.value("device_name").toString();
-        autoSync = s.value("auto_sync").toBool(true);
+        autoPull = s.value("auto_pull").toBool(true);
+        pullIntervalMin = s.value("pull_interval").toInt(30);
+        if (pullIntervalMin < 1) pullIntervalMin = 30;
         useProxy = s.value("use_proxy").toBool(false);
-        pending = s.value("pending").toBool(false);
         lastVersion = static_cast<qint64>(s.value("last_version").toDouble());
         lastSyncAt = static_cast<qint64>(s.value("last_sync_at").toDouble());
-        lastSyncDevice = s.value("last_sync_device").toString();
+        lastCount = s.value("last_count").toInt();
         lastError = s.value("last_error").toString();
 
         if (deviceId.isEmpty()) deviceId = QString::fromLatin1(QSysInfo::machineUniqueId());
 
-        items.clear();
-        tombstones.clear();
-        const auto m = ReadObject(kMetaFile);
-        const auto itemsObj = m.value("items").toObject();
-        for (const auto &k: itemsObj.keys()) {
-            const auto o = itemsObj.value(k).toObject();
-            SyncMetaEntry e;
-            e.hash = o.value("hash").toString();
-            e.mtime = static_cast<qint64>(o.value("mtime").toDouble());
-            items.insert(k, e);
-        }
-        for (const auto &v: m.value("tombstones").toArray()) {
-            const auto o = v.toObject();
-            SyncTombstone t;
-            t.kind = o.value("kind").toString();
-            t.id = o.value("id").toString();
-            t.mtime = static_cast<qint64>(o.value("mtime").toDouble());
-            if (!t.id.isEmpty()) tombstones.append(t);
+        nodes.clear();
+        const auto n = ReadObject(kNodesFile).value("nodes").toObject();
+        for (const auto &k: n.keys()) {
+            const auto o = n.value(k).toObject();
+            ServerNodeRef ref;
+            ref.syncId = o.value("sync_id").toString();
+            ref.linkHash = o.value("link_hash").toString();
+            ref.updatedAt = static_cast<qint64>(o.value("updated_at").toDouble());
+            if (!ref.syncId.isEmpty()) nodes.insert(k, ref);
         }
     }
 
@@ -81,51 +73,44 @@ namespace NekoGui_sync {
         o.insert("server", server);
         o.insert("username", username);
         o.insert("token", token);
+        o.insert("role", role);
         o.insert("device_id", deviceId);
         o.insert("device_name", deviceName);
-        o.insert("auto_sync", autoSync);
+        o.insert("auto_pull", autoPull);
+        o.insert("pull_interval", pullIntervalMin);
         o.insert("use_proxy", useProxy);
-        o.insert("pending", pending);
         o.insert("last_version", static_cast<double>(lastVersion));
         o.insert("last_sync_at", static_cast<double>(lastSyncAt));
-        o.insert("last_sync_device", lastSyncDevice);
+        o.insert("last_count", lastCount);
         o.insert("last_error", lastError);
         WriteObject(kStateFile, o);
     }
 
-    void SyncStore::saveMeta() const {
-        QJsonObject itemsObj;
-        for (auto it = items.constBegin(); it != items.constEnd(); ++it) {
+    void SyncStore::saveNodes() const {
+        QJsonObject items;
+        for (auto it = nodes.constBegin(); it != nodes.constEnd(); ++it) {
             QJsonObject e;
-            e.insert("hash", it.value().hash);
-            e.insert("mtime", static_cast<double>(it.value().mtime));
-            itemsObj.insert(it.key(), e);
-        }
-        QJsonArray tombs;
-        for (const auto &t: tombstones) {
-            QJsonObject e;
-            e.insert("kind", t.kind);
-            e.insert("id", t.id);
-            e.insert("mtime", static_cast<double>(t.mtime));
-            tombs.append(e);
+            e.insert("sync_id", it.value().syncId);
+            e.insert("link_hash", it.value().linkHash);
+            e.insert("updated_at", static_cast<double>(it.value().updatedAt));
+            items.insert(it.key(), e);
         }
         QJsonObject o;
-        o.insert("items", itemsObj);
-        o.insert("tombstones", tombs);
-        WriteObject(kMetaFile, o);
+        o.insert("nodes", items);
+        WriteObject(kNodesFile, o);
     }
 
     void SyncStore::clearSession() {
         token.clear();
-        items.clear();
-        tombstones.clear();
+        role.clear();
         lastVersion = 0;
         lastSyncAt = 0;
-        lastSyncDevice.clear();
+        lastCount = 0;
         lastError.clear();
-        pending = false;
+        // 落地记录一并清掉：重新登录时按服务端现状重建，不会留下孤儿
+        nodes.clear();
         saveState();
-        saveMeta();
+        saveNodes();
     }
 
 } // namespace NekoGui_sync

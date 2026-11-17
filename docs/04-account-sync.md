@@ -269,15 +269,67 @@ tar czf rekosync-$(date +%F).tgz -C /opt/rekosync data
 1. **单进程服务**：账号/令牌/节点池缓存在内存，多开同一 `data` 目录会互相覆盖。
 2. **改端口等于换链接**：服务端只按 `link` 判断有没有变化，编辑节点链接才会推给客户端。
 3. **本地改动不上传**：这是设计目标，不是缺陷。需要共享的改动请交给管理员。
-4. **Android 端尚未适配**：安卓客户端仍是旧的双向快照协议，连新服务端会拿到 403；
-   安卓本地节点不受影响。后续按同样的只读模型改。
+4. **不同端的本地改动互不影响**：同一账号在 Windows 与 Android 上各自可改本地副本，
+   下一次服务端改了这条链接才会覆盖回去。
 5. **旧快照留着不删**：`data/vaults/*.json` 不再读写，确认不需要后可手工删除。
 6. **节点链接含明文密钥**：`data/nodes.json` 里是明文，磁盘请做加密或严格权限
    （默认 0600/0700）。
 
 ---
 
-## 8. 代码位置
+## 8. Android 端
+
+安卓与 Windows 用**同一套协议、同一台服务器**，服务端代码无需改动；
+订阅层同样改成只读拉取，入口：侧边抽屉 →「账号与节点池」。
+
+### 8.1 与 Windows 的差异
+
+| 关注点 | Windows | Android |
+|---|---|---|
+| 本地存储 | JSON 文件（`config/profiles/*.json`） | Room（`proxy_entities` / `proxy_groups`） |
+| 节点标识 | 实体自带 `sync_id = "srv:<id>"` | 不改表结构，映射存在 `files/sync/nodes.json` |
+| 会话 | `config/sync/state.json` | `SharedPreferences("rekosync")` |
+| 定时拉取 | `QTimer`，可选 15 分钟~12 小时 | 协程定时，默认 30 分钟，开关在账号页 |
+| 触发 | 登录后、启动 3s、定时、手动 | 同左（`AccountFragment` 里可手动拉取） |
+
+### 8.2 拉取流程
+
+```
+GET /api/v1/nodes?version=<上次版本>
+  unchanged → 结束
+  逐条对照（key = 服务端节点 id，值 = {本地 profileId, 链接指纹}）：
+    · 本地没有         → 解析 link 建节点到对应分组
+    · 有、指纹未变      → 不动（本地改名/调参保留）
+    · 有、链接变了      → 原地覆盖 bean，保留 profileId 与 userOrder
+  服务端已删除/禁用 → 删除本地节点；正在使用的那条跳过，切走后再删
+```
+
+- 分组按服务端 `group` 字段匹配本地同名分组，没有就新建（空则落到「云端节点」）；
+- 链接解析用 `LinkParser`：vmess / vless / trojan / ss / socks / http / hysteria2 / tuic / naive，
+  与服务端放行清单一致；
+- vmess 做了宽容处理：遇到只给 `add/port/id` 的极简 JSON 会补 `net/tcp` 等缺省字段再解析
+  （部分面板的链接 Windows 能连、安卓内置解析器会拒绝）；
+- 解析出的 bean 先 `initializeDefaultValues()` 再落库，否则 Kryo 序列化会在
+  `Boolean.booleanValue()` 上空指针（tuic 的 `allowInsecure/disableSNI/fastConnect` 都是可空字段）；
+- 单条节点失败（链接坏了 / 字段异常）只跳过这一条，不影响整轮；失败原因写日志。
+
+### 8.3 本地文件
+
+```
+files/sync/nodes.json   服务端节点 id → {local_id, hash}
+```
+
+旧版的 `files/sync/meta.json`（墓碑、uuid 绑定、看不懂的远端条目）不再使用，
+升级后可以忽略；账号、令牌都在 SharedPreferences 里，不随文件删除丢失。
+
+### 8.4 已知差异
+
+1. 分组没有稳定标识，只能按**名称**匹配：把服务端分组改名等于新建分组。
+2. 不支持在客户端编辑节点后同步回服务端（本来也不允许上传）。
+3. 只在 Android 11（x86_64 模拟器）上验证过拉取 / 原地更新 / 禁用删除；
+   真机回归与 hysteria2 实际出网未覆盖。
+
+## 9. 代码位置
 
 | 文件 | 职责 |
 |---|---|
@@ -292,3 +344,7 @@ tar czf rekosync-$(date +%F).tgz -C /opt/rekosync data
 | `sync/SyncApi.{hpp,cpp}` | Qt Network 封装：Bearer、20s 超时、错误文案 |
 | `sync/SyncModel.{hpp,cpp}` | `sync_id` 生成、时间戳、内容指纹 |
 | `ui/dialog_account.{h,cpp}` | 「账号与节点订阅」对话框 |
+| `RekoboxForAndroid/.../sync/SyncEngine.kt` | 安卓拉取状态机、落地与清理 |
+| `RekoboxForAndroid/.../sync/SyncStore.kt` | Android 会话与 `nodes.json` |
+| `RekoboxForAndroid/.../sync/LinkParser.kt` | 分享链接 → 节点 bean（含 vmess 宽容解析） |
+| `RekoboxForAndroid/.../ui/AccountFragment.kt` | 「账号与节点池」界面 |

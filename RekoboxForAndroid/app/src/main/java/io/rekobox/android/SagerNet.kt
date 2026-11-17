@@ -90,7 +90,7 @@ class SagerNet : Application(),
 
                 updateNotificationChannels()
             }
-            // 云端同步：登录状态下启动后自动拉一次，本地改动防抖自动推送
+            // 节点订阅：登录后启动时拉一次，之后按间隔定时拉取（只读，无上传）
             runOnDefaultDispatcher {
                 SyncEngine.init()
             }

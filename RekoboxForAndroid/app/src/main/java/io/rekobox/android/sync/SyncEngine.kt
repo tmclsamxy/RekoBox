@@ -1,8 +1,8 @@
 package io.rekobox.android.sync
 
+import io.rekobox.android.database.DataStore
 import io.rekobox.android.database.GroupManager
 import io.rekobox.android.database.ProfileManager
-import io.rekobox.android.database.ProxyEntity
 import io.rekobox.android.database.ProxyGroup
 import io.rekobox.android.database.SagerDatabase
 import io.rekobox.android.ktx.Logs
@@ -14,18 +14,23 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import org.json.JSONArray
 import org.json.JSONObject
-import java.io.File
+import java.security.MessageDigest
 
 /**
- * 同步调度器：负责「什么时候同步、失败了怎么办」，合并逻辑在 SyncModel，字段映射在 SyncMapper。
+ * 订阅引擎：登录后从服务端**只读**拉取节点池，落到本地分组。
  *
- * 与 Windows 端共用同一份协议和服务器，服务端代码不需要任何改动。
- * 离线策略：失败后退避重试（5s → 10s → … → 5min），本地改动先落库并置 pending。
+ * 与 Windows 端共用同一份协议与服务器：
+ *   GET /api/v1/nodes[?version=N] → {version, count, read_only, nodes:[{id,link,name,group,...}]}
+ *
+ * 服务端由管理员维护节点池，客户端没有任何上传接口，所以本地增删改只影响本机。
+ * 一次拉取：服务端新增 → 本地新建；链接变了 → 覆盖本地那一条；服务端删除/禁用 → 本地删除
+ * （正在使用的节点跳过，等用户切走后再删）。
  */
 object SyncEngine {
 
-    enum class State { LOGGED_OUT, IDLE, SYNCING, OFFLINE, ERROR }
+    enum class State { LOGGED_OUT, IDLE, PULLING, OFFLINE, ERROR }
 
     @Volatile
     var state: State = State.LOGGED_OUT
@@ -35,31 +40,43 @@ object SyncEngine {
     var lastMessage: String = ""
         private set
 
-    /** UI 刷新回调（主线程） */
+    /** UI 刷新回调（主线程由调用方切） */
     @Volatile
     var onChange: (() -> Unit)? = null
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val mutex = Mutex()
     private var retryJob: Job? = null
-    private var debounceJob: Job? = null
+    private var timerJob: Job? = null
     private var retryDelayMs = 5_000L
     private var inited = false
-    private var applying = false
 
-    private const val TOMBSTONE_TTL_MS = 30L * 24 * 3600 * 1000
+    private const val DEFAULT_GROUP = "云端节点"
+    private const val MIN_PULL_INTERVAL_MS = 60_000L
+
+    /** 一次拉取的结果 */
+    data class Stats(
+        val created: Int = 0,
+        val updated: Int = 0,
+        val removed: Int = 0,
+        val skipped: Int = 0,
+    ) {
+        val changed: Boolean get() = created + updated + removed > 0
+    }
 
     fun loggedIn(): Boolean = SyncStore.loggedIn()
 
     fun statusText(): String = when {
         !loggedIn() -> "未登录（仅本地使用）"
-        state == State.SYNCING -> "正在同步…"
-        state == State.OFFLINE -> "离线，稍后重试${if (SyncStore.lastError.isNotEmpty()) "：${SyncStore.lastError}" else ""}"
-        state == State.ERROR -> "同步失败：${SyncStore.lastError}"
-        SyncStore.lastSyncAt > 0 -> "上次同步：${formatTime(SyncStore.lastSyncAt)}" +
-            if (SyncStore.pending) "（有本地改动待上传）" else ""
+        state == State.PULLING -> "正在拉取节点…"
+        state == State.OFFLINE ->
+            "离线，稍后重试${if (SyncStore.lastError.isNotEmpty()) "：${SyncStore.lastError}" else ""}"
 
-        else -> "已登录，尚未同步"
+        state == State.ERROR -> "拉取失败：${SyncStore.lastError}"
+        SyncStore.lastSyncAt > 0 ->
+            "上次拉取：${formatTime(SyncStore.lastSyncAt)} · ${SyncStore.lastCount} 个节点（只读）"
+
+        else -> "已登录，尚未拉取"
     }
 
     fun init() {
@@ -67,19 +84,26 @@ object SyncEngine {
         inited = true
         SyncStore.load()
         state = if (loggedIn()) State.IDLE else State.LOGGED_OUT
+        restartTimer()
 
-        // 本地增删改 → 防抖推送
-        ProfileManager.addListener(object : ProfileManager.Listener {
-            override suspend fun onAdd(profile: ProxyEntity) = noteLocalChange()
-            override suspend fun onUpdated(profile: ProxyEntity, noTraffic: Boolean) = noteLocalChange()
-            override suspend fun onUpdated(data: List<io.rekobox.android.aidl.TrafficData>) {}
-            override suspend fun onRemoved(groupId: Long, profileId: Long) = noteLocalChange()
-        })
-
-        // 启动 3 秒后拉一次：等界面起来，避免刷新时机太早
+        // 启动 3 秒后拉一次：等界面与数据库就绪，避免刷新时机太早
         scope.launch {
             delay(3000)
             if (loggedIn()) syncNow("startup")
+        }
+    }
+
+    /** 按当前开关与间隔重排定时拉取 */
+    fun restartTimer() {
+        timerJob?.cancel()
+        timerJob = null
+        if (!loggedIn() || !SyncStore.autoPull) return
+        val interval = SyncStore.pullIntervalMin * 60_000L
+        timerJob = scope.launch {
+            while (true) {
+                delay(interval.coerceAtLeast(MIN_PULL_INTERVAL_MS))
+                if (loggedIn() && SyncStore.autoPull) syncNow("timer")
+            }
         }
     }
 
@@ -105,31 +129,31 @@ object SyncEngine {
                 callback(false, r.error.ifEmpty { "登录失败" })
                 return@launch
             }
-            val token = try {
-                JSONObject(r.body ?: "").optString("token")
+            val body = try {
+                JSONObject(r.body ?: "")
             } catch (_: Exception) {
-                ""
+                JSONObject()
             }
+            val token = body.optString("token")
             if (token.isEmpty()) {
                 callback(false, "服务端没有返回令牌")
                 return@launch
             }
             if (SyncStore.username != username.trim()) {
-                // 换账号：旧基线必须清掉，否则会把 A 的删除动作带到 B
-                SyncStore.items.clear()
-                SyncStore.tombstones.clear()
-                SyncStore.foreign.clear()
-                SyncStore.bindings.clear()
+                // 换账号：旧的落地记录必须清掉，否则会把 A 的节点当成 B 的
+                SyncStore.nodes.clear()
                 SyncStore.lastVersion = 0
                 SyncStore.lastSyncAt = 0
+                SyncStore.lastCount = 0
+                SyncStore.saveNodes()
             }
             SyncStore.server = server
             SyncStore.username = username.trim()
             SyncStore.token = token
+            SyncStore.role = body.optJSONObject("user")?.optString("role") ?: ""
             SyncStore.lastError = ""
-            SyncStore.pending = false
-            SyncStore.saveMeta()
             state = State.IDLE
+            restartTimer()
             notifyChanged()
             callback(true, "登录成功")
             syncNow("login")
@@ -140,36 +164,23 @@ object SyncEngine {
         if (!loggedIn()) {
             SyncStore.clearSession()
             state = State.LOGGED_OUT
+            restartTimer()
             notifyChanged()
             callback?.invoke()
             return
         }
         scope.launch {
-            // 服务端连不上也要本地注销
+            // 服务端连不上也要本地注销：令牌留在服务端不影响本机继续用
             SyncApi.post(SyncStore.server, "/api/v1/auth/logout", SyncStore.token)
             SyncStore.clearSession()
+            timerJob?.cancel()
             state = State.LOGGED_OUT
             notifyChanged()
             callback?.invoke()
         }
     }
 
-    fun noteLocalChange() {
-        if (applying) return
-        if (!loggedIn()) return
-        if (!SyncStore.pending) {
-            SyncStore.pending = true
-            notifyChanged()
-        }
-        if (!SyncStore.autoSync) return
-        debounceJob?.cancel()
-        debounceJob = scope.launch {
-            delay(5000)
-            syncNow("local-change")
-        }
-    }
-
-    // ---------- 同步主流程 ----------
+    // ---------- 拉取 ----------
 
     fun syncNow(reason: String) {
         if (!loggedIn()) {
@@ -177,88 +188,163 @@ object SyncEngine {
             notifyChanged()
             return
         }
-        scope.launch { doSync(reason) }
+        scope.launch { doPull(reason) }
     }
 
-    private suspend fun doSync(reason: String) {
-        if (!mutex.tryLock()) return // 已有同步在跑，等下一轮
+    private suspend fun doPull(reason: String) {
+        if (!mutex.tryLock()) return // 已有拉取在跑，等下一轮
         try {
-            state = State.SYNCING
+            state = State.PULLING
             notifyChanged()
             retryJob?.cancel()
-            var attempt = 0
-            var round = 0
-            while (round <= 3) {
-                val local = buildLocalVault()
-                val remoteResp = SyncApi.get(SyncStore.server, "/api/v1/vault", SyncStore.token)
-                if (!remoteResp.ok) {
-                    fail(remoteResp)
-                    return
-                }
-                var baseVersion = 0L
-                var remote = SyncModel.Vault()
-                if (remoteResp.status == 200) {
-                    val obj = JSONObject(remoteResp.body ?: "{}")
-                    baseVersion = obj.optLong("version")
-                    remote = SyncModel.fromJson(obj.optJSONObject("payload") ?: JSONObject())
-                }
 
-                val (merged, conflicts) = SyncModel.merge(local, remote)
-                applyVault(merged)
+            var path = "/api/v1/nodes"
+            if (SyncStore.lastVersion > 0) path += "?version=${SyncStore.lastVersion}"
+            Logs.d("sync pull: $reason $path")
 
-                if (SyncModel.equals(merged, remote)) {
-                    finish(conflicts, pushed = false)
-                    return
-                }
-
-                val putBody = JSONObject()
-                    .put("base_version", baseVersion)
-                    .put("device", SyncStore.deviceName)
-                    .put("payload", SyncModel.toJson(merged))
-                val putResp = SyncApi.put(SyncStore.server, "/api/v1/vault", SyncStore.token, putBody)
-                if (putResp.ok) {
-                    SyncStore.lastVersion = try {
-                        JSONObject(putResp.body ?: "{}").optLong("version")
-                    } catch (_: Exception) {
-                        baseVersion + 1
-                    }
-                    finish(conflicts, pushed = true)
-                    return
-                }
-                if (putResp.status == 409) {
-                    round++
-                    continue // 别的设备抢先写了：重拉重合并
-                }
-                fail(putResp)
+            val r = SyncApi.get(SyncStore.server, path, SyncStore.token)
+            if (!r.ok) {
+                fail(r)
                 return
             }
-            fail(SyncApi.Result(409, "合并冲突重试次数过多"))
+            val obj = try {
+                JSONObject(r.body ?: "{}")
+            } catch (e: Exception) {
+                JSONObject()
+            }
+            if (obj.optBoolean("unchanged")) {
+                finish(Stats(), unchanged = true)
+                return
+            }
+            val version = obj.optLong("version")
+            val arr = obj.optJSONArray("nodes") ?: JSONArray()
+            val stats = applyNodes(version, arr)
+            finish(stats, unchanged = false)
         } catch (e: Exception) {
             Logs.w(e)
-            SyncStore.lastError = e.message ?: "同步异常"
+            SyncStore.lastError = e.message ?: "拉取异常"
             state = State.ERROR
             notifyChanged()
         } finally {
             mutex.unlock()
-            SyncStore.saveMeta()
+            SyncStore.saveNodes()
         }
     }
 
-    private fun finish(conflicts: Int, pushed: Boolean) {
-        SyncStore.lastSyncAt = SyncModel.nowMs()
-        SyncStore.pending = false
+    private suspend fun applyNodes(version: Long, arr: JSONArray): Stats {
+        var created = 0
+        var updated = 0
+        var removed = 0
+        var skipped = 0
+
+        val alive = HashSet<String>()
+        val groupIds = HashMap<String, Long>()
+        SagerDatabase.groupDao.allGroups().forEach { groupIds[it.name ?: ""] = it.id }
+
+        for (i in 0 until arr.length()) {
+            val o = arr.optJSONObject(i) ?: continue
+            val id = o.optString("id").trim()
+            val link = o.optString("link").trim()
+            if (id.isEmpty() || link.isEmpty()) {
+                skipped++
+                continue
+            }
+            alive.add(id)
+
+            val hash = sha1(link)
+            val ref = SyncStore.nodes[id]
+            val existing = ref?.let { SagerDatabase.proxyDao.getById(it.localId) }
+            if (existing != null && ref.hash == hash) continue // 链接没变：本地改名/调参保留
+
+            val bean = LinkParser.parse(link)
+            if (bean == null) {
+                skipped++
+                Logs.w("skip unparsable link: ${o.optString("name")}")
+                continue
+            }
+
+            // 单条节点失败不能拖垮整轮拉取：记日志后继续
+            val result = runCatching {
+                val gid = ensureGroup(groupIds, o.optString("group"))
+                if (existing != null) {
+                    existing.putBean(bean)
+                    existing.groupId = gid
+                    ProfileManager.updateProfile(existing)
+                    SyncStore.nodes[id] = SyncStore.NodeRef(existing.id, hash)
+                    updated++
+                } else {
+                    val profile = ProfileManager.createProfile(gid, bean)
+                    SyncStore.nodes[id] = SyncStore.NodeRef(profile.id, hash)
+                    created++
+                }
+            }
+            if (result.isFailure) {
+                skipped++
+                Logs.w("apply node failed: ${o.optString("name")}", result.exceptionOrNull() ?: Exception())
+            }
+        }
+
+        // 服务端已删除或已禁用（禁用不下发）
+        val gone = SyncStore.nodes.keys.filter { it !in alive }
+        for (id in gone) {
+            val ref = SyncStore.nodes[id] ?: continue
+            val profile = SagerDatabase.proxyDao.getById(ref.localId)
+            if (profile == null) {
+                SyncStore.nodes.remove(id)
+                continue
+            }
+            if (DataStore.selectedProxy == profile.id) {
+                // 正在用这条节点：等用户切走后再删，避免连接被打断
+                Logs.w("keep selected profile for later removal: ${profile.displayName()}")
+                continue
+            }
+            ProfileManager.deleteProfile(profile.groupId, profile.id)
+            SyncStore.nodes.remove(id)
+            removed++
+        }
+
+        SyncStore.lastVersion = version
+        SyncStore.lastCount = arr.length()
+        SyncStore.lastSyncAt = System.currentTimeMillis()
         SyncStore.lastError = ""
+        return Stats(created, updated, removed, skipped)
+    }
+
+    private suspend fun ensureGroup(cache: HashMap<String, Long>, rawName: String): Long {
+        val name = rawName.trim().ifEmpty { DEFAULT_GROUP }
+        cache[name]?.let { return it }
+
+        val existing = SagerDatabase.groupDao.allGroups().firstOrNull { it.name == name }
+        if (existing != null) {
+            cache[name] = existing.id
+            return existing.id
+        }
+        val group = GroupManager.createGroup(ProxyGroup(name = name))
+        cache[name] = group.id
+        return group.id
+    }
+
+    private fun finish(stats: Stats, unchanged: Boolean) {
         retryDelayMs = 5_000
         state = State.IDLE
-        lastMessage = if (pushed) "已上传本地改动" else "已是最新"
-        if (conflicts > 0) lastMessage += "，合并 $conflicts 处冲突"
+        SyncStore.lastError = ""
+        lastMessage = when {
+            unchanged -> "已是最新（${SyncStore.lastCount} 个节点）"
+            stats.changed -> buildString {
+                append("已更新：新增 ${stats.created} · 更新 ${stats.updated} · 删除 ${stats.removed}")
+                if (stats.skipped > 0) append("，${stats.skipped} 条无法解析")
+            }
+
+            else -> "已是最新（${SyncStore.lastCount} 个节点）"
+        }
         notifyChanged()
     }
 
     private fun fail(r: SyncApi.Result) {
         if (r.status == 401) {
-            // 令牌失效（服务端删号 / 改口令）：清会话退回本地模式，不动节点
+            // 令牌失效（服务端删号 / 改口令 / 禁用）：清会话退回本地模式，不动本地节点
             SyncStore.clearSession()
+            timerJob?.cancel()
             state = State.LOGGED_OUT
             SyncStore.lastError = r.error.ifEmpty { "登录已失效，请重新登录" }
             notifyChanged()
@@ -278,234 +364,12 @@ object SyncEngine {
         }
     }
 
-    // ---------- 本地 -> 报文 ----------
-
-    private fun stamp(item: SyncModel.Item, firstBaseline: Boolean) {
-        val key = SyncStore.key(item.kind, item.id)
-        val hash = item.contentHash()
-        val now = SyncModel.nowMs()
-        val meta = SyncStore.items[key]
-        when {
-            meta == null -> {
-                item.mtime = if (firstBaseline) 1 else now
-                SyncStore.items[key] = SyncStore.MetaEntry(hash, item.mtime)
-            }
-
-            meta.hash.isEmpty() -> {
-                // 内容刚从远端应用下来：采信当前内容，保留远端 mtime
-                meta.hash = hash
-                item.mtime = meta.mtime
-            }
-
-            meta.hash != hash -> {
-                item.mtime = now
-                meta.hash = hash
-                meta.mtime = now
-            }
-
-            else -> item.mtime = meta.mtime
-        }
-    }
-
-    private fun buildLocalVault(): SyncModel.Vault {
-        val vault = SyncModel.Vault()
-        val firstBaseline = SyncStore.items.isEmpty() && SyncStore.tombstones.isEmpty()
-        val groups = SagerDatabase.groupDao.allGroups()
-        val profiles = SagerDatabase.proxyDao.getAll()
-
-        // 绑定 uuid（老数据第一次同步时现场生成）
-        groups.forEach { g ->
-            if (g.id <= 0) return@forEach
-            if (SyncStore.uuidOf(SyncModel.KIND_GROUP, g.id) == null) {
-                SyncStore.bind(SyncModel.KIND_GROUP, g.id, SyncModel.newSyncId())
-            }
-        }
-        profiles.forEach { p ->
-            if (p.id <= 0) return@forEach
-            if (SyncStore.uuidOf(SyncModel.KIND_PROFILE, p.id) == null) {
-                SyncStore.bind(SyncModel.KIND_PROFILE, p.id, SyncModel.newSyncId())
-            }
-        }
-
-        // 分组
-        groups.forEach { g ->
-            if (g.id <= 0) return@forEach
-            val uuid = SyncStore.uuidOf(SyncModel.KIND_GROUP, g.id) ?: return@forEach
-            val data = SyncMapper.exportGroup(g)
-            if (data.length() == 0) return@forEach
-            // 组内顺序：按本地 userOrder，翻译成 uuid 列表；空组不带这个键，
-            // 避免把 Windows 侧的排序清空
-            val ordered = SagerDatabase.proxyDao.getByGroup(g.id)
-                .mapNotNull { SyncStore.uuidOf(SyncModel.KIND_PROFILE, it.id) }
-            if (ordered.isNotEmpty()) {
-                data.put("order_ids", org.json.JSONArray().apply { ordered.forEach { put(it) } })
-            }
-            val item = SyncModel.Item(SyncModel.KIND_GROUP, uuid, 0, data = data)
-            stamp(item, firstBaseline)
-            vault.groups.add(item)
-        }
-
-        // 节点：只同步能映射的类型；其余原样跳过（不会删、不会改）
-        profiles.forEach { p ->
-            if (p.id <= 0) return@forEach
-            val uuid = SyncStore.uuidOf(SyncModel.KIND_PROFILE, p.id) ?: return@forEach
-            val exported = SyncMapper.exportProfile(p) ?: return@forEach
-            val data = JSONObject().put("type", exported.first).put("bean", exported.second)
-            val groupUuid = SyncStore.uuidOf(SyncModel.KIND_GROUP, p.groupId) ?: ""
-            val item = SyncModel.Item(SyncModel.KIND_PROFILE, uuid, 0, groupId = groupUuid, data = data)
-            stamp(item, firstBaseline)
-            vault.profiles.add(item)
-        }
-
-        // 墓碑：绑定过但本地已删除
-        val aliveProfiles = profiles.map { it.id }.toSet()
-        val aliveGroups = groups.map { it.id }.toSet()
-        val vanished = SyncStore.bindings.filter { (k, _) ->
-            when {
-                k.startsWith("p:") -> k.substring(2).toLongOrNull()?.let { it !in aliveProfiles } ?: true
-                k.startsWith("g:") -> k.substring(2).toLongOrNull()?.let { it !in aliveGroups } ?: true
-                else -> false
-            }
-        }
-        vanished.forEach { (k, uuid) ->
-            val kind = if (k.startsWith("g:")) SyncModel.KIND_GROUP else SyncModel.KIND_PROFILE
-            SyncStore.tombstones.add(
-                SyncModel.Item(kind, uuid, SyncModel.nowMs(), deleted = true)
-            )
-            SyncStore.items.remove(SyncStore.key(kind, uuid))
-            SyncStore.bindings.remove(k)
-        }
-
-        // 过期墓碑清理
-        val cutoff = SyncModel.nowMs() - TOMBSTONE_TTL_MS
-        SyncStore.tombstones.removeAll { it.mtime < cutoff }
-
-        vault.groups.addAll(SyncStore.tombstones.filter { it.kind == SyncModel.KIND_GROUP })
-        vault.profiles.addAll(SyncStore.tombstones.filter { it.kind == SyncModel.KIND_PROFILE })
-
-        // 本端看不懂的远端条目：原样带回去，避免把别端的节点抹掉
-        SyncStore.foreign.forEach { (key, obj) ->
-            val kind = if (key.startsWith("group:")) SyncModel.KIND_GROUP else SyncModel.KIND_PROFILE
-            val item = SyncModel.Item(
-                kind = kind,
-                id = obj.optString("id"),
-                mtime = obj.optLong("mtime"),
-                groupId = obj.optString("group"),
-                deleted = obj.optBoolean("deleted"),
-                data = obj.optJSONObject("data"),
-            )
-            if (item.id.isEmpty()) return@forEach
-            if (kind == SyncModel.KIND_GROUP) vault.groups.add(item) else vault.profiles.add(item)
-        }
-
-        return vault
-    }
-
-    // ---------- 报文 -> 本地 ----------
-
-    private suspend fun applyVault(vault: SyncModel.Vault) {
-        applying = true
-        try {
-            val existingGroups = SagerDatabase.groupDao.allGroups()
-            val existingProfiles = SagerDatabase.proxyDao.getAll()
-
-            // 1) 分组先建，节点才知道落到哪
-            vault.groups.filter { !it.deleted }.forEach { item ->
-                val localId = SyncStore.localIdOf(SyncModel.KIND_GROUP, item.id)
-                val local = existingGroups.firstOrNull { it.id == localId }
-                val data = item.data ?: return@forEach
-                if (local == null) {
-                    val group = ProxyGroup(name = data.optString("name").ifEmpty { "同步分组" })
-                    group.userOrder = SagerDatabase.groupDao.nextOrder() ?: 1
-                    val newId = SagerDatabase.groupDao.createGroup(group)
-                    SyncStore.bind(SyncModel.KIND_GROUP, newId, item.id)
-                } else {
-                    SyncMapper.applyGroup(local, data)
-                    SagerDatabase.groupDao.updateGroup(local)
-                }
-                SyncStore.items[SyncStore.key(SyncModel.KIND_GROUP, item.id)] =
-                    SyncStore.MetaEntry("", item.mtime)
-            }
-
-            // 2) 节点
-            vault.profiles.forEach { item ->
-                if (item.deleted) {
-                    val localId = SyncStore.localIdOf(SyncModel.KIND_PROFILE, item.id)
-                    if (localId != null) {
-                        ProfileManager.deleteProfile2(0, localId)
-                        SyncStore.unbind(SyncModel.KIND_PROFILE, localId)
-                    }
-                    SyncStore.items.remove(SyncStore.key(SyncModel.KIND_PROFILE, item.id))
-                    SyncStore.foreign.remove(SyncStore.key(SyncModel.KIND_PROFILE, item.id))
-                    return@forEach
-                }
-
-                val data = item.data ?: return@forEach
-                val typeName = data.optString("type")
-
-                // 能解析的才动；不能解析的原样存着，下次同步带回去
-                val bean = SyncMapper.importBean(data)
-                if (bean == null) {
-                    SyncStore.foreign[SyncStore.key(SyncModel.KIND_PROFILE, item.id)] = JSONObject()
-                        .put("id", item.id)
-                        .put("mtime", item.mtime)
-                        .put("group", item.groupId)
-                        .put("data", data)
-                    return@forEach
-                }
-
-                val groupId = SyncStore.localIdOf(SyncModel.KIND_GROUP, item.groupId)
-                    ?: existingGroups.firstOrNull()?.id
-                    ?: return@forEach
-                val localId = SyncStore.localIdOf(SyncModel.KIND_PROFILE, item.id)
-                if (localId == null) {
-                    val profile = ProfileManager.createProfile(groupId, bean)
-                    SyncStore.bind(SyncModel.KIND_PROFILE, profile.id, item.id)
-                } else {
-                    val local = existingProfiles.firstOrNull { it.id == localId }
-                    if (local != null) {
-                        local.putBean(bean)
-                        local.groupId = groupId
-                        ProfileManager.updateProfile(local)
-                    }
-                }
-                SyncStore.items[SyncStore.key(SyncModel.KIND_PROFILE, item.id)] =
-                    SyncStore.MetaEntry("", item.mtime)
-            }
-
-            // 3) 组内顺序：按远端的 order_ids 校正本地 userOrder，
-            //    否则安卓按创建顺序排列，再推回去会把 Windows 的排序打乱
-            vault.groups.filter { !it.deleted }.forEach { item ->
-                val orderIds = item.data?.optJSONArray("order_ids") ?: return@forEach
-                for (i in 0 until orderIds.length()) {
-                    val localId = SyncStore.localIdOf(SyncModel.KIND_PROFILE, orderIds.optString(i))
-                        ?: continue
-                    val profile = SagerDatabase.proxyDao.getById(localId) ?: continue
-                    val want = (i + 1).toLong()
-                    if (profile.userOrder != want) {
-                        profile.userOrder = want
-                        SagerDatabase.proxyDao.updateProxy(profile)
-                    }
-                }
-            }
-
-            // 4) 删除分组（节点已按墓碑先删完）
-            vault.groups.filter { it.deleted }.forEach { item ->
-                val localId = SyncStore.localIdOf(SyncModel.KIND_GROUP, item.id)
-                if (localId != null && SagerDatabase.groupDao.allGroups().size > 1) {
-                    GroupManager.deleteGroup(localId)
-                    SyncStore.unbind(SyncModel.KIND_GROUP, localId)
-                }
-                SyncStore.items.remove(SyncStore.key(SyncModel.KIND_GROUP, item.id))
-                SyncStore.foreign.remove(SyncStore.key(SyncModel.KIND_GROUP, item.id))
-            }
-        } finally {
-            SyncStore.saveMeta()
-            applying = false
-        }
-    }
-
     // ---------- 工具 ----------
+
+    private fun sha1(text: String): String {
+        val bytes = MessageDigest.getInstance("SHA-1").digest(text.toByteArray())
+        return bytes.joinToString("") { "%02x".format(it) }
+    }
 
     private fun normalizeServer(input: String): String {
         var s = input.trim()
@@ -523,7 +387,7 @@ object SyncEngine {
     }
 
     private fun notifyChanged() {
-        SyncStore.saveMeta()
+        SyncStore.saveNodes()
         onChange?.invoke()
     }
 }

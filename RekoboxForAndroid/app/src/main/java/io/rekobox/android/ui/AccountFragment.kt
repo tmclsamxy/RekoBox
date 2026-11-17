@@ -12,8 +12,10 @@ import io.rekobox.android.sync.SyncEngine
 import io.rekobox.android.sync.SyncStore
 
 /**
- * 账号与同步：登录 / 注销 / 立即同步 / 自动同步开关。
- * 协议与 Windows 端一致，服务端同一套接口，账号由服务端管理员创建（不提供注册）。
+ * 账号与节点订阅：登录 / 注销 / 立即拉取 / 自动拉取开关。
+ *
+ * 节点池由管理员在服务端网页控制台维护，客户端**只读**：本地增删改不会上传，
+ * 所以任何人改不到别人看到的节点。协议与 Windows 端一致，服务端同一套接口。
  */
 class AccountFragment : ToolbarFragment(R.layout.layout_account) {
 
@@ -55,8 +57,11 @@ class AccountFragment : ToolbarFragment(R.layout.layout_account) {
             refresh()
         }
         btnLogout.setOnClickListener { onLogout() }
-        switchAuto.isChecked = SyncStore.autoSync
-        switchAuto.setOnCheckedChangeListener { _, checked -> SyncStore.autoSync = checked }
+        switchAuto.isChecked = SyncStore.autoPull
+        switchAuto.setOnCheckedChangeListener { _, checked ->
+            SyncStore.autoPull = checked
+            SyncEngine.restartTimer()
+        }
 
         SyncEngine.onChange = {
             activity?.runOnUiThread { if (isAdded) refresh() }
@@ -128,7 +133,7 @@ class AccountFragment : ToolbarFragment(R.layout.layout_account) {
         editServer.isEnabled = !logged
         editUser.isEnabled = !logged
         btnLogout.isEnabled = logged
-        btnSync.isEnabled = logged && SyncEngine.state != SyncEngine.State.SYNCING
+        btnSync.isEnabled = logged && SyncEngine.state != SyncEngine.State.PULLING
         switchAuto.isEnabled = logged
     }
 }

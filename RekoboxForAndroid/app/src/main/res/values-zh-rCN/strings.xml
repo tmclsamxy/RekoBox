@@ -614,18 +614,18 @@
     <string name="snell_reuse_summary">仅适用于 v4-v6</string>
 
     <!-- 账号与同步 -->
-    <string name="menu_account">账号与同步</string>
+    <string name="menu_account">账号与节点订阅</string>
     <string name="account_server_hint">http://1.2.3.4:8080</string>
     <string name="account_username">用户名</string>
     <string name="account_password">口令</string>
     <string name="account_login">登录</string>
-    <string name="account_sync_now">立即同步</string>
+    <string name="account_sync_now">立即拉取</string>
     <string name="account_logout">注销</string>
-    <string name="account_auto_sync">本地改动后自动上传</string>
-    <string name="account_hint">账号由服务端管理员创建，本程序不提供注册。登录后令牌长期有效，只有主动注销、服务端改口令或删号才会失效。未登录时全部功能照常，仅本地保存。</string>
+    <string name="account_auto_sync">自动拉取节点（每 30 分钟）</string>
+    <string name="account_hint">节点由管理员在服务端网页控制台统一维护，客户端只能拉取、不能上传，所以本机增删改不会影响其他用户。账号由管理员创建（不提供注册）。登录后令牌长期有效，只有主动注销、服务端改口令或禁用账号才会失效。未登录时全部功能照常，仅本地保存。</string>
     <string name="account_current">%1$s @ %2$s</string>
     <string name="account_not_logged_in">未登录（仅本地使用）</string>
     <string name="account_logging_in">正在登录…</string>
-    <string name="account_syncing">正在同步…</string>
+    <string name="account_syncing">正在拉取…</string>
     <string name="account_logged_out">已注销</string>
 </resources>

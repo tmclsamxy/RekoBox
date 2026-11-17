@@ -47,10 +47,15 @@ func main() {
 		enable   = flag.String("enable", "", "启用账号后退出")
 		list     = flag.Bool("users", false, "列出账号后退出")
 		password = flag.String("password", "", "-adduser / -addadmin / -passwd 的口令；留空则从 stdin 读取")
+		showVer  = flag.Bool("version", false, "打印版本后退出")
 	)
 	flag.Parse()
 
 	maxBodyBytes = *bodyMax
+	if *showVer {
+		fmt.Printf("rekosync %s\n", serverVersion)
+		return
+	}
 
 	store, err := OpenStore(*dataDir)
 	if err != nil {

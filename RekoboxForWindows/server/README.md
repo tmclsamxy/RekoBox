@@ -24,15 +24,42 @@
 
 ## 一键部署（推荐）
 
-### 方式 A：在服务器上直接跑（全新系统也行）
+### 方式 A：一条命令（服务器上，任意目录）
 
 ```bash
-# 已有仓库
-cd Rekobox/RekoboxForWindows/server && bash deploy.sh
-
-# 没有仓库也行，脚本会自己装依赖、拉源码
-bash deploy.sh          # 装依赖/Go → 编译 → systemd → 建管理员 → 自检
+curl -fsSL https://raw.githubusercontent.com/tmclsamxy/RekoBox/main/RekoboxForWindows/server/deploy.sh | sudo bash
 ```
+
+如果交互提示没出现（个别终端对管道有限制），换成 stdin 仍是终端的形式：
+
+```bash
+sudo bash <(curl -fsSL https://raw.githubusercontent.com/tmclsamxy/RekoBox/main/RekoboxForWindows/server/deploy.sh)
+```
+
+脚本启动后是**交互菜单**：
+
+```
+  RekoBox 服务端部署工具  v2.1.0
+  ──────────────────────────────────────
+    系统：Ubuntu 24.04 (x86_64)
+    状态：未安装
+
+  1) 安装
+  2) 更新到最新版本
+  3) 清理卸载（完全删除，可重新安装）
+  0) 退出
+```
+
+安装时会逐项询问，直接回车用默认值：
+
+| 询问项 | 默认 | 说明 |
+|---|---|---|
+| 服务端口 | `8080` | 1–65535，会同时写进 systemd、防火墙放行与打印的客户端地址 |
+| 只监听 127.0.0.1 | `n` | 前置 nginx/CDN 时选 `y`，不对外暴露端口 |
+| 安装目录 | `/opt/rekosync` | 程序与数据都在这里，可自定义 |
+| 管理员账号 | `alice` | 登录网页控制台用 |
+| 管理员口令 | 自动生成 | 手动输入至少 6 位；留空自动生成 20 位随机口令，只显示一次 |
+| 放行防火墙端口 | `y` | 有启用的 ufw/firewalld 时自动放行 |
 
 脚本自己处理这些事：
 
@@ -42,20 +69,28 @@ bash deploy.sh          # 装依赖/Go → 编译 → systemd → 建管理员 �
 | Go 工具链 | 没有或低于 1.21 时，从阿里云 / golang.google.cn / go.dev 依次尝试下载安装 |
 | 源码 | 脚本旁有 `main.go` 直接用；否则 `git clone`，失败再退回源码包下载 |
 | 编译 | `CGO_ENABLED=0 go build -trimpath -ldflags "-s -w"`，`GOPROXY=goproxy.cn` |
-| 安装 | 系统用户 `rekosync`、`/opt/rekosync`、systemd（开机自启 + 崩溃拉起） |
-| 账号 | 默认建**管理员**账号（`-addadmin`），交互输口令，留空自动生成 20 位只显示一次 |
-| 收尾 | 可选放行 ufw/firewalld，本机 `/api/v1/health` 自检，打印控制台与客户端地址 |
+| 安装 | 系统用户 `rekosync`、systemd（开机自启 + 崩溃拉起）、写 `/etc/rekobox-install.conf` 记录安装位置 |
+| 账号 | 建**管理员**账号（`-addadmin`） |
+| 收尾 | 放行防火墙、`/api/v1/health` 自检、打印控制台与客户端地址 |
 
-常用参数：
+**更新 / 卸载**：再跑一次同一条命令（或 `bash deploy.sh`），菜单里选 2 / 3。
+更新会拉最新源码重编译、保留 `data/`（账号与节点池），新版本起不来会自动回滚到 `rekosync.prev`。
+卸载会删除服务、程序、数据、源码缓存、系统用户与防火墙规则，并做残留校验，删干净后可立即重装。
+
+### 常用参数（脚本化 / 远程部署）
 
 ```bash
-bash deploy.sh -y                          # 全默认，不交互
-bash deploy.sh --port 9000                 # 换服务端口（默认 8080）
-bash deploy.sh --listen 127.0.0.1:8080     # 交给 nginx 反代
-bash deploy.sh --account bob --reset-password   # 给已有账号重设口令
+bash deploy.sh -y                                  # 全默认，不交互安装
+bash deploy.sh --install --port 9000 --account root # 指定端口与管理员账号
+bash deploy.sh --update                            # 更新（自动定位安装目录）
+bash deploy.sh --uninstall -y                      # 完全卸载（不确认）
+bash deploy.sh --uninstall --keep-data             # 先把数据打包到 /var/backups 再卸载
+bash deploy.sh --uninstall                         # 交互确认，需输入 uninstall
+bash deploy.sh --listen 127.0.0.1:8080             # 交给 nginx 反代
+bash deploy.sh --account bob --reset-password      # 给已有账号重设口令
 bash deploy.sh --src /root/Rekobox/RekoboxForWindows/server  # 指定源码目录
-bash deploy.sh --binary ./rekosync         # 直接装现成二进制，跳过编译
-bash deploy.sh --skip-deps                 # 不装系统依赖（已备好 go 时）
+bash deploy.sh --binary ./rekosync                 # 直接装现成二进制，跳过编译
+bash deploy.sh --skip-deps                         # 不装系统依赖（已备好 go 时）
 ```
 
 ### 方式 B：在开发机远程部署（Windows / macOS）

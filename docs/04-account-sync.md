@@ -196,17 +196,32 @@ config/sync/nodes.json   「服务端节点 id → 本地 sync_id + 上次应用
 
 ## 5. 部署
 
-### 一键部署
+### 一键部署（一条命令）
+
+服务器上任意目录执行：
 
 ```bash
-cd Rekobox/RekoboxForWindows/server && bash deploy.sh
+curl -fsSL https://raw.githubusercontent.com/tmclsamxy/RekoBox/main/RekoboxForWindows/server/deploy.sh | sudo bash
+# 交互不出现时改用：sudo bash <(curl -fsSL <同一地址>)
 ```
 
-默认创建**管理员**账号（`-addadmin`），完成后打印：
+脚本是交互菜单，三个动作：
+
+| 选项 | 行为 |
+|---|---|
+| 1 安装 | 询问服务端口、是否只监听本机、安装目录、管理员账号与口令、是否放行防火墙；装依赖 → 装 Go（缺）→ 拉源码 → 编译 → systemd → 建管理员 → 自检 |
+| 2 更新 | 拉最新源码重编译，保留 `data/`（账号与节点池）；新版本起不起来会自动回滚 `rekosync.prev` |
+| 3 清理卸载 | 停服务 → 删单元文件 → 删程序与数据 → 删源码缓存 → 删系统用户/组 → 移除防火墙规则 → 残留校验；删干净后可立即重装 |
+
+安装位置会记到 `/etc/rekobox-install.conf`，之后更新/卸载不用重复 `--dir`。
+卸载默认删除数据（账号/令牌/节点池），要留档用 `--keep-data`（先打包到 `/var/backups`）。
+脚本化用法：`--install -y`、`--update`、`--uninstall -y`，详见 `server/README.md`。
+
+完成后打印：
 
 ```
-网页控制台  http://<公网IP>:8080/admin
-客户端填    http://<公网IP>:8080
+网页控制台  http://<公网IP>:<端口>/admin
+客户端填    http://<公网IP>:<端口>
 ```
 
 ### 手动

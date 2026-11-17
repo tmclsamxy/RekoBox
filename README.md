@@ -70,6 +70,40 @@ bash libs/build_all_mingw.sh          # 依赖 → 内核 → CMake → 编译 �
 curl --proxy http://127.0.0.1:2080 https://ip.sb
 ```
 
+## 服务端（可选，一条命令）
+
+节点池服务端 `rekosync` 跑在任意 Linux VPS 上：管理员在网页控制台粘贴分享链接维护节点，
+客户端登录后**只读**拉取，任何人（包括自己）都无法上传或改动别人的节点。
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/tmclsamxy/RekoBox/main/RekoboxForWindows/server/deploy.sh | sudo bash
+# 交互提示没出现时（个别终端对管道有限制）：
+sudo bash <(curl -fsSL https://raw.githubusercontent.com/tmclsamxy/RekoBox/main/RekoboxForWindows/server/deploy.sh)
+```
+
+脚本是交互菜单：
+
+```
+  RekoBox 服务端部署工具  v2.1.0
+  ──────────────────────────────────────
+    系统：Ubuntu 24.04 (x86_64)
+    状态：未安装
+
+  1) 安装
+  2) 更新到最新版本
+  3) 清理卸载（完全删除，可重新安装）
+  0) 退出
+```
+
+- **安装**：逐项询问服务端口、是否只监听 `127.0.0.1`、安装目录、管理员账号与口令（留空自动生成）、
+  是否放行防火墙；然后自动装依赖 / Go / 拉源码 / 编译 / 装 systemd / 建管理员 / 自检
+- **更新**：拉最新源码重编译，`data/` 不动；启动失败自动回滚
+- **卸载**：服务 + 程序 + 数据 + 源码缓存 + 系统用户 + 防火墙规则全清，残留校验，可立即重装
+
+装完打开 `http://<服务器>:<端口>/admin` 用管理员账号登录即可录节点。
+详见 [`RekoboxForWindows/server/README.md`](RekoboxForWindows/server/README.md) 与
+[`docs/04-account-sync.md`](docs/04-account-sync.md)。
+
 ## 文档
 
 | 文件 | 内容 |

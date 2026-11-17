@@ -68,9 +68,9 @@
   "count": 2,
   "read_only": true,
   "nodes": [
-    {"id":"d9c0b6c156f9","name":"香港三网优化-限速50Mbps","type":"tuic",
-     "addr":"154.37.223.225","port":25247,"group":"香港","remark":"限速 50Mbps",
-     "link":"tuic://uuid:pass@154.37.223.225:25247?congestion_control=bbr#..."}
+    {"id":"d9c0b6c156f9","name":"香港-01","type":"tuic",
+     "addr":"203.0.113.10","port":25247,"group":"香港","remark":"示例备注",
+     "link":"tuic://00000000-1111-2222-3333-444444444444:password@203.0.113.10:25247?congestion_control=bbr#..."}
   ]
 }
 ```

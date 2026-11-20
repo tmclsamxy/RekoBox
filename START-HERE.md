@@ -11,8 +11,8 @@
 
 ```
 C:\Users\Mrcheng\WorkBuddy\spaces\2026_11_20_16-03-25\rekobox\dist\
-├── Rekobox-mac-dev.bundle   完整 git 仓库（含提交历史）← 推荐
-└── Rekobox-mac-dev.zip      纯快照（无 .git）
+├── Rekobox-mac-dev.bundle   完整 git 仓库，9.6 MB，744 个提交        ← 推荐
+└── Rekobox-mac-dev.zip      纯快照，5.6 MB，无 .git（只解压就能看代码）
 ```
 
 任选一种方式搬过去：U 盘 / 微信文件传输助手 / 局域网直接下载（见下）。
@@ -110,3 +110,19 @@ open RekoboxForMac/build/RekoBox.app
 那份提示词是自包含的：它会让 AI 先读交接文档，再按顺序编译、修错、验收。
 
 如果 AI 有终端权限，它可以直接跑上面第 3 步；没有的话它会让你跑、你贴输出。
+
+---
+
+## 7. 以后要重新打包（在 Windows 上）
+
+```bash
+cd <repo>
+git bundle create dist/Rekobox-mac-dev.bundle --all
+```
+
+只用 bundle，不要用 `git archive` 出 zip：这台 Windows 的 `core.autocrlf=true`，
+导出的文本可能在解压后带 CRLF，`bash` 会报 `$'\r': command not found`。
+bundle 由 Mac 侧 `git clone` 落地，换行符一定是 LF。
+
+打包前记得先 commit——bundle 只包含已提交的内容。
+

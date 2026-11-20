@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>RekoBox 节点控制台</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9' fill='%233b82f6'/%3E%3Ctext x='16' y='23' font-family='sans-serif' font-size='19' font-weight='700' fill='white' text-anchor='middle'%3ER%3C/text%3E%3C/svg%3E">
 <style>
   :root {
     --bg: #f4f6f8;
@@ -341,6 +342,39 @@
     padding: 11px 13px; overflow-x: auto; font-family: var(--mono); font-size: 12px;
     line-height: 1.6; margin: 8px 0;
   }
+  /* 权限组 */
+  .policy {
+    display: flex; align-items: center; gap: 12px;
+    padding: 11px 14px;
+    border-bottom: 1px solid var(--line);
+    background: var(--warn-soft);
+    font-size: 13px;
+  }
+  .policy.closed { background: var(--ok-soft); }
+  .policy .spacer { flex: 1; }
+  .policy b { font-weight: 600; }
+  .badge.grp {
+    background: var(--panel-2); color: var(--text);
+    border: 1px solid var(--line); font-weight: 500;
+  }
+  .badge.grp.none { color: var(--muted); border-style: dashed; font-weight: 400; }
+  .picklist {
+    max-height: 46vh; overflow: auto;
+    border: 1px solid var(--line); border-radius: 9px;
+    background: var(--panel-2);
+  }
+  .pickrow {
+    display: flex; align-items: center; gap: 9px;
+    padding: 7px 11px; border-bottom: 1px solid var(--line);
+    font-size: 12.5px;
+  }
+  .pickrow:last-child { border-bottom: 0; }
+  .pickrow label { display: flex; align-items: center; gap: 9px; flex: 1; cursor: pointer; min-width: 0; }
+  .pickrow input[type=checkbox] { width: auto; flex: 0 0 auto; }
+  .pickrow .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pickrow .addr { font-family: var(--mono); color: var(--muted); font-size: 11.5px; white-space: nowrap; }
+  .pickrow.off { opacity: .55; }
+
   @media (max-width: 720px) {
     header.top { padding: 10px 14px; gap: 8px; }
     header.top .meta { display: none; }
@@ -395,11 +429,13 @@
       <div class="card"><div class="k">节点总数</div><div class="v" id="statTotal">–</div></div>
       <div class="card"><div class="k">已启用</div><div class="v" id="statEnabled">–</div></div>
       <div class="card"><div class="k">账号数</div><div class="v" id="statUsers">–</div></div>
+      <div class="card"><div class="k">权限组</div><div class="v" id="statGroups">–<small id="statUngrouped"></small></div></div>
       <div class="card"><div class="k">节点池版本</div><div class="v" id="statVersion">–<small id="statUpdated"></small></div></div>
     </div>
 
     <div class="tabs">
       <button class="tab active" data-tab="nodes">节点管理</button>
+      <button class="tab" data-tab="groups">权限组</button>
       <button class="tab" data-tab="users">账号管理</button>
       <button class="tab" data-tab="doc">接入说明</button>
     </div>
@@ -475,6 +511,47 @@
       </div>
     </section>
 
+    <!-- 权限组 -->
+    <section class="panel" id="tab-groups" style="display:none">
+      <div class="toolbar">
+        <input type="text" id="newGroupName" placeholder="新权限组名称（如 套餐A / 内测）" style="width:240px">
+        <input type="text" id="newGroupDesc" placeholder="说明（可选）" style="width:200px">
+        <button class="btn btn-primary btn-sm" id="btnCreateGroup">创建权限组</button>
+        <div class="spacer"></div>
+        <span class="hint">一个节点可以属于多个组；账号可同时属于多个组，取并集</span>
+      </div>
+
+      <div class="policy" id="policyBar">
+        <div>
+          <b>未分组账号策略：<span id="policyLabel">–</span></b>
+          <div class="hint" id="policyHint"></div>
+        </div>
+        <div class="spacer"></div>
+        <button class="btn btn-sm" id="btnTogglePolicy">–</button>
+      </div>
+
+      <div class="tablewrap">
+        <table>
+          <thead>
+            <tr>
+              <th>权限组</th>
+              <th style="width:90px;">节点数</th>
+              <th style="width:90px;">账号数</th>
+              <th class="hide-sm">说明</th>
+              <th class="hide-sm" style="width:140px;">更新时间</th>
+              <th style="width:210px;"></th>
+            </tr>
+          </thead>
+          <tbody id="groupBody"></tbody>
+        </table>
+      </div>
+      <div class="empty" id="groupEmpty" style="display:none">
+        <b>还没有权限组</b>
+        建一个组、勾上它可以访问的节点，然后把账号分配进去。
+        未分配权限组的账号按上面的兜底策略处理。
+      </div>
+    </section>
+
     <!-- 账号 -->
     <section class="panel" id="tab-users" style="display:none">
       <div class="toolbar">
@@ -495,10 +572,11 @@
               <th>账号</th>
               <th style="width:92px;">角色</th>
               <th style="width:84px;">状态</th>
-              <th style="width:96px;">在线设备</th>
-              <th style="width:140px;">最后活动</th>
-              <th style="width:120px;">创建时间</th>
-              <th style="width:190px;"></th>
+              <th class="hide-sm" style="width:190px;">权限组</th>
+              <th style="width:96px;">可见节点</th>
+              <th class="hide-sm" style="width:96px;">在线设备</th>
+              <th class="hide-sm" style="width:120px;">最后活动</th>
+              <th style="width:210px;"></th>
             </tr>
           </thead>
           <tbody id="userBody"></tbody>
@@ -516,24 +594,41 @@
         客户端登录后只有一个数据入口 <code>GET /api/v1/nodes</code>。
         服务端不存在任何客户端上传接口，<code>PUT /api/v1/vault</code> 一律返回 403。
         因此任何一个用户都无法改动别人看到的节点列表。
+        <h4>权限组（谁能拉哪些节点）</h4>
+        在「权限组」页签建组 → 点「配置节点」勾上这个组能访问的节点 → 再到「账号管理」把账号分配进去。
+        一个账号可以属于多个组，可见节点取并集；管理员账号不受限制，始终能看到全部节点。<br>
+        未分配权限组的账号按页签顶部的兜底策略处理：<code>open</code> 可见全部启用节点（升级前的默认行为），
+        <code>closed</code> 什么都看不到。收紧权限时先把账号分好组，再切 closed。<br>
+        权限组或归属一改，节点池版本自动 +1，客户端下次拉取（含 <code>?version=</code> 增量查询）就会拿到新结果，
+        客户端不需要改代码。
         <h4>新增节点</h4>
         直接把机场/自建的分享链接粘进来，一行一条。支持的协议：
         <code>vmess</code> <code>vless</code> <code>trojan</code> <code>ss</code>
         <code>socks5</code> <code>http</code> <code>tuic</code> <code>hysteria2</code> <code>naive+https</code>。
-        禁用节点不会下发；删除节点后，客户端下次拉取会把它从本地移除。
+        禁用节点不会下发；删除节点后，客户端下次拉取会把它从本地移除，同时它也会从各权限组里摘掉。
         <h4>命令行</h4>
         <pre>rekosync -addadmin root -password '...'   # 建管理员
 rekosync -adduser  alice -password '...'  # 建普通账号
-rekosync -users                           # 列账号
+rekosync -users                           # 列账号（含权限组）
 rekosync -passwd alice                    # 改口令（踢掉旧令牌）
-rekosync -disable alice / -enable alice   # 禁用 / 启用</pre>
+rekosync -disable alice / -enable alice   # 禁用 / 启用
+rekosync -addgroup 套餐A                   # 建权限组
+rekosync -groups                          # 列权限组
+rekosync -groupnodes "套餐A=id1,id2"       # 配置可访问节点
+rekosync -usergroups "alice=套餐A"         # 分配权限组
+rekosync -acl closed                      # 未分组账号看不到节点</pre>
         <h4>接口一览</h4>
         <div class="kv">
-          <div class="k"><code>POST /api/v1/auth/login</code></div><div>{username, password, device} → {token, user.role}</div>
-          <div class="k"><code>GET /api/v1/nodes</code></div><div>已登录账号：启用中的节点（只读）</div>
+          <div class="k"><code>POST /api/v1/auth/login</code></div><div>{username, password, device} → {token, user.role, user.groups}</div>
+          <div class="k"><code>GET /api/v1/nodes</code></div><div>已登录账号：<b>其权限组内</b>启用中的节点（只读）</div>
           <div class="k"><code>GET /api/v1/admin/nodes</code></div><div>管理员：全量节点（含禁用）</div>
           <div class="k"><code>POST /api/v1/admin/nodes</code></div><div>管理员：{links, group, remark} 批量录入</div>
           <div class="k"><code>PATCH /api/v1/admin/nodes/{id}</code></div><div>管理员：改名/分组/备注/启用/换链接</div>
+          <div class="k"><code>GET|POST /api/v1/admin/groups</code></div><div>管理员：权限组列表 / {name, description, nodes?}</div>
+          <div class="k"><code>PATCH|DELETE /api/v1/admin/groups/{id}</code></div><div>管理员：改名 / 删组（连带摘掉账号归属）</div>
+          <div class="k"><code>POST /api/v1/admin/groups/{id}/nodes</code></div><div>管理员：{ids:[...]} 设置该组可访问的节点</div>
+          <div class="k"><code>POST /api/v1/admin/users/{name}/groups</code></div><div>管理员：{groups:[组id]} 设置账号归属</div>
+          <div class="k"><code>POST /api/v1/admin/acl/policy</code></div><div>管理员：{default_policy:"open"|"closed"}</div>
         </div>
       </div>
     </section>
@@ -584,6 +679,56 @@ rekosync -disable alice / -enable alice   # 禁用 / 启用</pre>
   </form>
 </div>
 
+<!-- 新建 / 编辑权限组 -->
+<div class="mask" id="groupMask">
+  <form class="modal" id="groupForm" style="max-width:440px">
+    <h3 id="groupModalTitle">新建权限组</h3>
+    <div class="field">
+      <label>名称</label>
+      <input type="text" id="groupName" placeholder="例如 套餐A / 内测 / 香港专线">
+    </div>
+    <div class="field">
+      <label>说明</label>
+      <input type="text" id="groupDesc" placeholder="可选，只给管理员看">
+    </div>
+    <div class="row">
+      <button type="button" class="btn" id="btnGroupCancel">取消</button>
+      <button type="submit" class="btn btn-primary">保存</button>
+    </div>
+  </form>
+</div>
+
+<!-- 配置权限组的可访问节点 -->
+<div class="mask" id="nodesMask">
+  <div class="modal" style="max-width:640px">
+    <h3 id="pickTitle">配置可访问节点</h3>
+    <div class="field" style="display:flex;gap:8px;align-items:center;">
+      <input type="search" id="pickSearch" placeholder="搜索节点…" style="flex:1">
+      <button class="btn btn-sm" id="btnPickAll">全选</button>
+      <button class="btn btn-sm" id="btnPickNone">清空</button>
+    </div>
+    <div class="hint" id="pickCount" style="margin-bottom:8px;"></div>
+    <div class="picklist" id="pickList"></div>
+    <div class="row" style="margin-top:14px;">
+      <button type="button" class="btn" id="btnPickCancel">取消</button>
+      <button type="button" class="btn btn-primary" id="btnPickSave">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- 给账号分配权限组 -->
+<div class="mask" id="ugrpMask">
+  <div class="modal" style="max-width:480px">
+    <h3 id="ugrpTitle">分配权限组</h3>
+    <div class="picklist" id="ugrpList"></div>
+    <div class="hint" style="margin-top:8px;">不勾任何组 = 未分组，按兜底策略处理。</div>
+    <div class="row" style="margin-top:14px;">
+      <button type="button" class="btn" id="btnUgrpCancel">取消</button>
+      <button type="button" class="btn btn-primary" id="btnUgrpSave">保存</button>
+    </div>
+  </div>
+</div>
+
 <script>
 (function () {
   "use strict";
@@ -600,12 +745,19 @@ rekosync -disable alice / -enable alice   # 禁用 / 启用</pre>
     me: null,
     nodes: [],
     users: [],
+    groups: [],
+    acl: { default_policy: "open", ungrouped: [] },
     selected: new Set(),
     tab: "nodes",
     filter: { q: "", group: "", state: "" },
     overview: null,
     editing: null,
     passTarget: null,
+    groupEditing: null,   // null = 新建，否则是正在改名的组 id
+    groupPicking: null,   // 正在配置节点的组 id
+    picked: new Set(),    // 节点选择器里的勾选状态
+    ugrpTarget: null,     // 正在分配权限组的账号
+    ugrpPicked: new Set(),
     timer: 0,
   };
 
@@ -728,9 +880,10 @@ rekosync -disable alice / -enable alice   # 禁用 / 启用</pre>
     await refreshAll();
     if (state.timer) clearInterval(state.timer);
     state.timer = setInterval(() => {
-      if (state.tab === "nodes" && !$("editMask").classList.contains("open")) {
-        refreshAll(true).catch(() => {});
-      }
+      // 有弹窗开着就别自动刷新，否则正在勾选的节点列表会被覆盖
+      const busy = ["editMask", "passMask", "groupMask", "nodesMask", "ugrpMask"]
+        .some((id) => $(id).classList.contains("open"));
+      if (!busy && state.tab !== "doc") refreshAll(true).catch(() => {});
     }, 20000);
   }
 
@@ -751,18 +904,25 @@ rekosync -disable alice / -enable alice   # 禁用 / 启用</pre>
 
   // ---------- 数据 ----------
   async function refreshAll(quiet) {
-    const [ov, nd, us] = await Promise.all([
+    const [ov, nd, us, gp] = await Promise.all([
       api("/api/v1/admin/overview"),
       api("/api/v1/admin/nodes"),
       api("/api/v1/admin/users"),
+      api("/api/v1/admin/groups"),
     ]);
     state.overview = ov;
     state.nodes = nd.nodes || [];
     const aliveIds = new Set(state.nodes.map((n) => n.id));
     Array.from(state.selected).forEach((id) => { if (!aliveIds.has(id)) state.selected.delete(id); });
     state.users = us.users || [];
+    state.groups = gp.groups || [];
+    state.acl = {
+      default_policy: gp.default_policy || "open",
+      ungrouped: gp.ungrouped || (us.acl && us.acl.ungrouped) || [],
+    };
     renderOverview();
     renderNodes();
+    renderGroups();
     renderUsers();
     if (!quiet) toast("已刷新", "ok");
   }
@@ -792,9 +952,12 @@ rekosync -disable alice / -enable alice   # 禁用 / 启用</pre>
     const ov = state.overview || {};
     const n = ov.nodes || {};
     const s = ov.server || {};
+    const a = ov.acl || {};
     $("statTotal").textContent = n.total == null ? "–" : n.total;
     $("statEnabled").textContent = n.enabled == null ? "–" : n.enabled;
     $("statUsers").textContent = (ov.users && ov.users.total) || 0;
+    $("statGroups").innerHTML = esc(a.groups == null ? "–" : a.groups) +
+      '<small>' + esc(ov.users && ov.users.ungrouped ? ov.users.ungrouped + " 个账号未分组" : "") + "</small>";
     $("statVersion").innerHTML = esc(n.version == null ? "–" : n.version) +
       '<small>' + esc(n.updated_at ? fmtTime(n.updated_at) : "") + "</small>";
     $("topMeta").innerHTML = '<span class="dot"></span>' +
@@ -809,6 +972,253 @@ rekosync -disable alice / -enable alice   # 禁用 / 启用</pre>
     if (sec < 86400) return Math.floor(sec / 3600) + " 小时";
     return Math.floor(sec / 86400) + " 天";
   }
+
+  // ---------- 权限组 ----------
+
+  function policyOpen() { return state.acl.default_policy !== "closed"; }
+
+  function renderPolicy() {
+    const open = policyOpen();
+    const un = state.acl.ungrouped || [];
+    $("policyLabel").textContent = open ? "open · 可见全部启用节点" : "closed · 看不到任何节点";
+    if (open) {
+      $("policyHint").textContent = un.length
+        ? "当前有 " + un.length + " 个账号未分组：" + un.join("、") +
+          "。升级前的旧账号都落在这一档，收紧前请先给它们分组。"
+        : "没有未分组的普通账号。可以切成 closed，让「不分组 = 无节点」。";
+    } else {
+      $("policyHint").textContent = un.length
+        ? "有 " + un.length + " 个账号未分组，它们现在拉不到任何节点：" + un.join("、")
+        : "没有未分组的普通账号，权限完全由权限组决定。";
+    }
+    $("policyBar").classList.toggle("closed", !open);
+    $("btnTogglePolicy").textContent = open ? "改成 closed（收紧）" : "改回 open（兼容旧账号）";
+  }
+
+  function groupUsage() {
+    const m = new Map();
+    state.users.forEach((u) => {
+      (u.groups || []).forEach((g) => m.set(g.id, (m.get(g.id) || 0) + 1));
+    });
+    return m;
+  }
+
+  function renderGroups() {
+    renderPolicy();
+    const usage = groupUsage();
+    $("groupBody").innerHTML = state.groups.map((g) => (
+      "<tr>" +
+        '<td class="name">' + esc(g.name) + "</td>" +
+        '<td class="time">' + (g.nodes || []).length + "</td>" +
+        '<td class="time">' + (usage.get(g.id) || 0) + "</td>" +
+        '<td class="hide-sm" style="color:var(--muted);font-size:12px;max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' +
+          (g.description ? esc(g.description) : "—") + "</td>" +
+        '<td class="time hide-sm">' + esc(fmtTime(g.updated_at)) + "</td>" +
+        '<td><div class="row-actions">' +
+          '<button class="btn btn-sm" data-gact="nodes" data-id="' + esc(g.id) + '">配置节点</button>' +
+          '<button class="btn btn-sm" data-gact="edit" data-id="' + esc(g.id) + '">编辑</button>' +
+          '<button class="btn btn-sm btn-danger" data-gact="del" data-id="' + esc(g.id) + '">删除</button>' +
+        "</div></td>" +
+      "</tr>"
+    )).join("");
+    $("groupEmpty").style.display = state.groups.length ? "none" : "block";
+  }
+
+  $("btnTogglePolicy").addEventListener("click", async () => {
+    const next = policyOpen() ? "closed" : "open";
+    const un = (state.acl.ungrouped || []).length;
+    if (next === "closed" && un > 0 &&
+        !confirm("改成 closed 后，未分组的 " + un + " 个账号会立刻拉不到任何节点。继续？")) return;
+    try {
+      const r = await api("/api/v1/admin/acl/policy", { method: "POST", body: { default_policy: next } });
+      state.acl.default_policy = r.default_policy || next;
+      state.acl.ungrouped = r.ungrouped || [];
+      renderGroups();
+      renderUsers();
+      toast("未分组账号策略已改为 " + state.acl.default_policy, "ok");
+    } catch (err) {
+      toast(err.message, "err");
+    }
+  });
+
+  $("btnCreateGroup").addEventListener("click", () => {
+    state.groupEditing = null;
+    $("groupModalTitle").textContent = "新建权限组";
+    $("groupName").value = "";
+    $("groupDesc").value = "";
+    $("groupMask").classList.add("open");
+    $("groupName").focus();
+  });
+
+  $("groupForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const name = $("groupName").value.trim();
+    const description = $("groupDesc").value.trim();
+    if (!name) { toast("填写权限组名称", "err"); return; }
+    try {
+      if (state.groupEditing) {
+        await api("/api/v1/admin/groups/" + state.groupEditing, {
+          method: "PATCH", body: { name, description },
+        });
+        toast("已保存", "ok");
+      } else {
+        await api("/api/v1/admin/groups", { method: "POST", body: { name, description } });
+        toast("权限组已创建，接着点「配置节点」挑它能访问的节点", "ok");
+      }
+      $("groupMask").classList.remove("open");
+      await refreshAll(true);
+    } catch (err) {
+      toast(err.message, "err");
+    }
+  });
+
+  $("btnGroupCancel").addEventListener("click", () => $("groupMask").classList.remove("open"));
+  $("groupMask").addEventListener("click", (e) => { if (e.target === $("groupMask")) $("groupMask").classList.remove("open"); });
+
+  $("groupBody").addEventListener("click", async (e) => {
+    const btn = e.target.closest("[data-gact]");
+    if (!btn) return;
+    const id = btn.dataset.id;
+    const g = state.groups.find((x) => x.id === id);
+    if (!g) return;
+    const act = btn.dataset.gact;
+    if (act === "edit") {
+      state.groupEditing = id;
+      $("groupModalTitle").textContent = "编辑权限组";
+      $("groupName").value = g.name || "";
+      $("groupDesc").value = g.description || "";
+      $("groupMask").classList.add("open");
+    } else if (act === "nodes") {
+      openNodePicker(g);
+    } else if (act === "del") {
+      const used = groupUsage().get(id) || 0;
+      if (!confirm("删除权限组「" + g.name + "」？" +
+          (used ? "有 " + used + " 个账号属于它，会被摘掉归属。" : "") +
+          "节点本身不会被删除。")) return;
+      try {
+        await api("/api/v1/admin/groups/" + id, { method: "DELETE" });
+        await refreshAll(true);
+        toast("已删除权限组 " + g.name, "ok");
+      } catch (err) {
+        toast(err.message, "err");
+      }
+    }
+  });
+
+  // ---- 节点选择器 ----
+
+  function openNodePicker(g) {
+    state.groupPicking = g.id;
+    state.picked = new Set(g.nodes || []);
+    $("pickTitle").textContent = "配置「" + g.name + "」可访问节点";
+    $("pickSearch").value = "";
+    renderPicker();
+    $("nodesMask").classList.add("open");
+  }
+
+  function renderPicker() {
+    const q = $("pickSearch").value.trim().toLowerCase();
+    const rows = state.nodes.filter((n) => !q ||
+      [n.name, n.addr, n.group, n.remark, n.type, String(n.port)]
+        .join(" ").toLowerCase().includes(q));
+    $("pickList").innerHTML = rows.length ? rows.map((n) => (
+      '<div class="pickrow' + (n.enabled ? "" : " off") + '">' +
+        '<label><input type="checkbox" class="pick" value="' + esc(n.id) + '"' +
+          (state.picked.has(n.id) ? " checked" : "") + ">" +
+          '<span class="nm">' + esc(n.name) + "</span>" +
+          '<span class="badge t-' + esc(n.type) + '">' + esc(n.type) + "</span>" +
+          '<span class="addr">' + esc(n.addr) + ":" + esc(n.port) + "</span>" +
+          '<span class="hint">' + (n.enabled ? "" : "已停用") + "</span>" +
+        "</label>" +
+      "</div>"
+    )).join("") : '<div class="empty">没有匹配的节点</div>';
+    $("pickCount").textContent = "已选 " + state.picked.size + " / " + state.nodes.length +
+      " 个节点（停用的节点即使勾上也下发不了）";
+  }
+
+  $("pickSearch").addEventListener("input", renderPicker);
+
+  $("pickList").addEventListener("change", (e) => {
+    if (!e.target.classList.contains("pick")) return;
+    const id = e.target.value;
+    if (e.target.checked) state.picked.add(id); else state.picked.delete(id);
+    $("pickCount").textContent = "已选 " + state.picked.size + " / " + state.nodes.length +
+      " 个节点（停用的节点即使勾上也下发不了）";
+  });
+
+  $("btnPickAll").addEventListener("click", () => {
+    state.nodes.forEach((n) => state.picked.add(n.id));
+    renderPicker();
+  });
+  $("btnPickNone").addEventListener("click", () => {
+    state.picked.clear();
+    renderPicker();
+  });
+  $("btnPickCancel").addEventListener("click", () => $("nodesMask").classList.remove("open"));
+  $("nodesMask").addEventListener("click", (e) => { if (e.target === $("nodesMask")) $("nodesMask").classList.remove("open"); });
+
+  $("btnPickSave").addEventListener("click", async () => {
+    const id = state.groupPicking;
+    if (!id) return;
+    $("btnPickSave").disabled = true;
+    try {
+      const r = await api("/api/v1/admin/groups/" + id + "/nodes", {
+        method: "POST", body: { ids: Array.from(state.picked) },
+      });
+      $("nodesMask").classList.remove("open");
+      await refreshAll(true);
+      toast("已保存，该组账号下次拉取即可看到 " + (r.node_count || 0) + " 个节点", "ok");
+    } catch (err) {
+      toast(err.message, "err");
+    } finally {
+      $("btnPickSave").disabled = false;
+    }
+  });
+
+  // ---- 账号 ↔ 权限组 ----
+
+  function openUserGroups(name) {
+    const u = state.users.find((x) => x.name === name);
+    if (!u) return;
+    state.ugrpTarget = name;
+    state.ugrpPicked = new Set((u.groups || []).map((g) => g.id));
+    $("ugrpTitle").textContent = "分配权限组 · " + name;
+    $("ugrpList").innerHTML = state.groups.length ? state.groups.map((g) => (
+      '<div class="pickrow"><label>' +
+        '<input type="checkbox" class="ugrp" value="' + esc(g.id) + '"' +
+          (state.ugrpPicked.has(g.id) ? " checked" : "") + ">" +
+        '<span class="nm">' + esc(g.name) + "</span>" +
+        '<span class="hint">' + (g.nodes || []).length + " 个节点</span>" +
+      "</label></div>"
+    )).join("") : '<div class="empty">还没有权限组，先到「权限组」页签建一个</div>';
+    $("ugrpMask").classList.add("open");
+  }
+
+  $("ugrpList").addEventListener("change", (e) => {
+    if (!e.target.classList.contains("ugrp")) return;
+    if (e.target.checked) state.ugrpPicked.add(e.target.value);
+    else state.ugrpPicked.delete(e.target.value);
+  });
+  $("btnUgrpCancel").addEventListener("click", () => $("ugrpMask").classList.remove("open"));
+  $("ugrpMask").addEventListener("click", (e) => { if (e.target === $("ugrpMask")) $("ugrpMask").classList.remove("open"); });
+
+  $("btnUgrpSave").addEventListener("click", async () => {
+    const name = state.ugrpTarget;
+    if (!name) return;
+    $("btnUgrpSave").disabled = true;
+    try {
+      const r = await api("/api/v1/admin/users/" + encodeURIComponent(name) + "/groups", {
+        method: "POST", body: { groups: Array.from(state.ugrpPicked) },
+      });
+      $("ugrpMask").classList.remove("open");
+      await refreshAll(true);
+      toast(name + " 现在可见 " + (r.node_count || 0) + " 个节点", "ok");
+    } catch (err) {
+      toast(err.message, "err");
+    } finally {
+      $("btnUgrpSave").disabled = false;
+    }
+  });
 
   function visibleNodes() {
     const q = state.filter.q.toLowerCase();
@@ -1037,14 +1447,24 @@ rekosync -disable alice / -enable alice   # 禁用 / 启用</pre>
   function renderUsers() {
     $("userBody").innerHTML = state.users.map((u) => {
       const isMe = state.me && state.me.name === u.name;
+      const groups = u.groups || [];
+      const grpCell = u.role === "admin"
+        ? '<span class="badge grp none">不受限制</span>'
+        : (groups.length
+          ? groups.map((g) => '<span class="badge grp">' + esc(g.name || g.id) + "</span>").join(" ")
+          : '<span class="badge grp none">未分组</span>');
+      const count = u.node_count == null ? "–" : u.node_count;
       return "<tr>" +
         '<td class="name">' + esc(u.name) + (isMe ? ' <span class="hint">（当前）</span>' : "") + "</td>" +
         '<td>' + (u.role === "admin" ? '<span class="badge">管理员</span>' : "普通用户") + "</td>" +
         '<td><span style="color:' + (u.disabled ? "var(--bad)" : "var(--ok)") + '">' + (u.disabled ? "已禁用" : "正常") + "</span></td>" +
-        '<td class="time">' + (u.sessions || 0) + "</td>" +
-        '<td class="time">' + esc(ago(u.last_used)) + "</td>" +
-        '<td class="time">' + esc(fmtTime(u.created_at)) + "</td>" +
+        '<td class="hide-sm">' + grpCell + "</td>" +
+        '<td class="time">' + esc(count) + (u.role === "admin" ? ' <span class="hint">全部</span>' : "") + "</td>" +
+        '<td class="time hide-sm">' + (u.sessions || 0) + "</td>" +
+        '<td class="time hide-sm">' + esc(ago(u.last_used)) + "</td>" +
         '<td><div class="row-actions">' +
+          (u.role === "admin" ? "" :
+            '<button class="btn btn-sm" data-uact="groups" data-name="' + esc(u.name) + '">权限组</button>') +
           '<button class="btn btn-sm" data-uact="pass" data-name="' + esc(u.name) + '">改口令</button>' +
           (isMe ? "" :
             '<button class="btn btn-sm" data-uact="state" data-name="' + esc(u.name) + '" data-disabled="' + (u.disabled ? "1" : "0") + '">' +
@@ -1053,6 +1473,7 @@ rekosync -disable alice / -enable alice   # 禁用 / 启用</pre>
         "</div></td>" +
       "</tr>";
     }).join("");
+    renderPolicy();
   }
 
   $("btnCreateUser").addEventListener("click", async () => {
@@ -1075,7 +1496,9 @@ rekosync -disable alice / -enable alice   # 禁用 / 启用</pre>
     if (!btn) return;
     const name = btn.dataset.name;
     try {
-      if (btn.dataset.uact === "pass") {
+      if (btn.dataset.uact === "groups") {
+        openUserGroups(name);
+      } else if (btn.dataset.uact === "pass") {
         state.passTarget = name;
         $("passFor").textContent = "为 " + name + " 设置新口令";
         $("passNew").value = "";
@@ -1136,9 +1559,11 @@ rekosync -disable alice / -enable alice   # 禁用 / 启用</pre>
       document.querySelectorAll(".tab").forEach((x) => x.classList.toggle("active", x === t));
       state.tab = t.dataset.tab;
       $("tab-nodes").style.display = state.tab === "nodes" ? "" : "none";
+      $("tab-groups").style.display = state.tab === "groups" ? "" : "none";
       $("tab-users").style.display = state.tab === "users" ? "" : "none";
       $("tab-doc").style.display = state.tab === "doc" ? "" : "none";
       if (state.tab !== "nodes") $("addDrawer").classList.remove("open");
+      if (state.tab === "groups" || state.tab === "users") renderGroups();
     });
   });
 

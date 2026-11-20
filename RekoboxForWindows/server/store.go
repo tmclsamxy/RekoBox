@@ -3,9 +3,10 @@ package main
 // 文件型存储：一台 VPS、一个进程、几百 KB 数据，用不着数据库。
 //
 // 目录结构（-data 指定，默认 ./data）：
-//   users.json            用户表（口令哈希）
+//   users.json            用户表（口令哈希 + 所属权限组）
 //   tokens.json           令牌表（键为令牌 SHA-256）
-//   vaults/<user>.json    每个账号一份节点快照 + 版本号
+//   acl.json              权限组 + 未分组账号的兜底策略（见 acl.go）
+//   vaults/<user>.json    旧版按账号快照（已废弃，不再读写）
 //
 // 所有写入都走「临时文件 + rename」，断电最多丢最后一次写，不会写出半截 JSON。
 
@@ -42,6 +43,20 @@ type User struct {
 	//   admin 可登录网页控制台管理节点与账号
 	//   user  只能用客户端拉取节点（只读，不能上传）
 	Role string `json:"role,omitempty"`
+	// Groups 是账号所属权限组的 id 列表（见 acl.go）。
+	// 空表示「未分组」，行为由 acl.json 的 default_policy 决定：
+	//   open   → 可见全部启用节点（旧版本账号升级后的默认状态）
+	//   closed → 什么都看不到
+	// 这是唯一新增的字段；旧 users.json 没有它，反序列化后就是 nil，语义等价于未分组。
+	Groups []string `json:"groups,omitempty"`
+}
+
+// cloneUser 做浅拷贝 + Groups 深拷贝，避免调用方改到内部状态。
+func cloneUser(u *User) *User {
+	cp := *u
+	cp.Password = ""
+	cp.Groups = append([]string(nil), u.Groups...)
+	return &cp
 }
 
 // RoleAdmin 是网页控制台的准入角色。
@@ -166,7 +181,8 @@ func (s *Store) saveVaultLocked(v *Vault) error {
 
 // ---- 用户管理（只在服务端 CLI 调用，不暴露 HTTP 注册接口）----
 
-func (s *Store) CreateUser(name, password, role string) (*User, error) {
+// CreateUser 建号。groups 为变参：不传等于未分组，老调用点无需改动。
+func (s *Store) CreateUser(name, password, role string, groups ...string) (*User, error) {
 	if !validUserName(name) {
 		return nil, fmt.Errorf("非法用户名 %q：只允许小写字母、数字与 _-.，2-32 位且不以符号开头", name)
 	}
@@ -188,13 +204,89 @@ func (s *Store) CreateUser(name, password, role string) (*User, error) {
 	if _, ok := s.users[name]; ok {
 		return nil, ErrUserExists
 	}
-	u := &User{Name: name, Password: hash, CreatedAt: time.Now().UnixMilli(), Role: role}
+	u := &User{
+		Name:      name,
+		Password:  hash,
+		CreatedAt: time.Now().UnixMilli(),
+		Role:      role,
+		Groups:    dedupeStrings(groups),
+	}
 	s.users[name] = u
 	if err := s.saveUsersLocked(); err != nil {
 		delete(s.users, name)
 		return nil, err
 	}
-	return u, nil
+	return cloneUser(u), nil
+}
+
+// SetUserGroups 整体替换账号的权限组归属。
+// 调用方负责先校验这些组是否存在（见 admin.go 的 adminSetUserGroups）。
+func (s *Store) SetUserGroups(name string, groups []string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	u, ok := s.users[name]
+	if !ok {
+		return ErrNoUser
+	}
+	old := u.Groups
+	u.Groups = dedupeStrings(groups)
+	if err := s.saveUsersLocked(); err != nil {
+		u.Groups = old
+		return err
+	}
+	return nil
+}
+
+// RemoveGroupFromUsers 在权限组被删除时摘掉账号上的引用，返回受影响的账号数。
+// 不摘的话，账号会永久保留一个指向空组的 id，排查起来非常费劲。
+func (s *Store) RemoveGroupFromUsers(groupID string) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	snapshot := make(map[string][]string)
+	for name, u := range s.users {
+		if len(u.Groups) == 0 {
+			continue
+		}
+		kept := make([]string, 0, len(u.Groups))
+		for _, g := range u.Groups {
+			if g == groupID {
+				continue
+			}
+			kept = append(kept, g)
+		}
+		if len(kept) == len(u.Groups) {
+			continue
+		}
+		snapshot[name] = u.Groups
+		u.Groups = kept
+	}
+	if len(snapshot) == 0 {
+		return 0, nil
+	}
+	if err := s.saveUsersLocked(); err != nil {
+		for name, old := range snapshot {
+			if u, ok := s.users[name]; ok {
+				u.Groups = old
+			}
+		}
+		return 0, err
+	}
+	return len(snapshot), nil
+}
+
+// UngroupedUsers 返回未分配权限组的账号名（不含管理员），供控制台提示用。
+func (s *Store) UngroupedUsers() []string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]string, 0)
+	for name, u := range s.users {
+		if u.isAdmin() || len(u.Groups) != 0 {
+			continue
+		}
+		out = append(out, name)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // SetDisabled 禁用/启用账号。禁用会顺手吊销该账号的全部令牌，
@@ -278,12 +370,20 @@ func (s *Store) ListUsers() []*User {
 	defer s.mu.RUnlock()
 	out := make([]*User, 0, len(s.users))
 	for _, u := range s.users {
-		cp := *u
-		cp.Password = ""
-		out = append(out, &cp)
+		out = append(out, cloneUser(u))
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out
+}
+
+// GetUser 返回账号副本（不含口令哈希）；不存在返回 nil。
+func (s *Store) GetUser(name string) *User {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if u, ok := s.users[name]; ok {
+		return cloneUser(u)
+	}
+	return nil
 }
 
 // ---- 登录 / 令牌 ----
@@ -323,9 +423,7 @@ func (s *Store) Authenticate(name, password, agent string) (string, *User, error
 		delete(s.tokens, tokenID(token))
 		return "", nil, err
 	}
-	cp := *u
-	cp.Password = ""
-	return token, &cp, nil
+	return token, cloneUser(u), nil
 }
 
 func (s *Store) TokenUser(token string) (*User, bool) {
@@ -338,9 +436,7 @@ func (s *Store) TokenUser(token string) (*User, bool) {
 	var u *User
 	if ok {
 		if uu, exist := s.users[sess.User]; exist {
-			cp := *uu
-			cp.Password = ""
-			u = &cp
+			u = cloneUser(uu)
 		}
 	}
 	s.mu.RUnlock()

@@ -14,6 +14,9 @@ package main
 //
 // 只读约束：节点池由管理员统一维护，客户端没有任何写入入口。
 // 旧的 /api/v1/vault（双向快照）保留 GET 兼容，PUT 直接 403。
+//
+// 可见性：GET /api/v1/nodes 不再是「全量节点池」，而是「该账号权限组允许的节点」，
+// 解析逻辑集中在 nodeScope / visibleNodes 一处，避免各处各写一遍过滤条件。
 
 import (
 	"encoding/json"
@@ -31,15 +34,17 @@ import (
 type Server struct {
 	store   *Store
 	nodes   *NodeStore
+	acl     *ACLStore
 	limiter *loginLimiter
 	started time.Time
 	version string
 }
 
-func NewServer(store *Store, nodes *NodeStore, version string) *Server {
+func NewServer(store *Store, nodes *NodeStore, acl *ACLStore, version string) *Server {
 	return &Server{
 		store:   store,
 		nodes:   nodes,
+		acl:     acl,
 		limiter: newLoginLimiter(10, 10*time.Minute),
 		started: time.Now(),
 		version: version,
@@ -116,6 +121,38 @@ func (s *Server) requireUser(w http.ResponseWriter, r *http.Request) *User {
 	return u
 }
 
+// ---- 可见性（权限组） ----
+
+// nodeScope 解析账号能看见哪些节点。
+// allow == nil 表示不限制（管理员，或未分组账号 + open 策略）；
+// restricted == true 表示只能看 allow 里的节点（allow 可能是空集合）。
+//
+// 这是全服务唯一的权限判定入口：拉取接口、登录响应、/me、管理端统计都调它，
+// 保证「界面显示的数量」和「实际下发的数量」不会打架。
+func (s *Server) nodeScope(u *User) (allow map[string]bool, restricted bool) {
+	if u == nil {
+		// 没登录不该走到这里（调用方已 401），按最小权限处理
+		return map[string]bool{}, true
+	}
+	if u.isAdmin() {
+		// 管理员不受权限组限制：否则管理员把自己分进某个组之后，
+		// 控制台里看不到别的节点，等于把自己锁在门外。
+		return nil, false
+	}
+	return s.acl.Scope(u.Groups)
+}
+
+// visibleNodes 返回该账号可见的节点摘要，以及结果是否被权限组裁剪过。
+// 永远不会返回 nil（JSON 里必须是 [] 而不是 null）。
+func (s *Server) visibleNodes(u *User) ([]NodeSummary, bool) {
+	allow, restricted := s.nodeScope(u)
+	list := s.nodes.ListByIDs(allow)
+	if list == nil {
+		list = []NodeSummary{}
+	}
+	return list, restricted
+}
+
 // ---- handlers ----
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
@@ -174,6 +211,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	s.limiter.Reset(ip)
 
+	visible, restricted := s.visibleNodes(user)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"token":      token,
 		"expires_at": 0, // 0 = 永久有效，只有注销或服务端删号才失效
@@ -181,9 +219,14 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 			"name":       user.Name,
 			"created_at": user.CreatedAt,
 			"role":       roleOf(user),
+			"groups":     groupNames(s.acl, user.Groups),
 		},
 		"server_time": time.Now().UnixMilli(),
-		"nodes":       map[string]any{"count": len(s.nodes.List()), "read_only": true},
+		"nodes": map[string]any{
+			"count":      len(visible),
+			"read_only":  true,
+			"restricted": restricted,
+		},
 	})
 }
 
@@ -208,27 +251,38 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 	if u == nil {
 		return
 	}
-	version, updatedAt, count := s.nodes.Version()
+	version, updatedAt, _ := s.nodes.Version()
+	visible, restricted := s.visibleNodes(u)
 	writeJSON(w, http.StatusOK, map[string]any{
-		"user":        map[string]any{"name": u.Name, "created_at": u.CreatedAt, "role": roleOf(u)},
+		"user": map[string]any{
+			"name":       u.Name,
+			"created_at": u.CreatedAt,
+			"role":       roleOf(u),
+			"groups":     groupNames(s.acl, u.Groups),
+		},
 		"server_time": time.Now().UnixMilli(),
 		"nodes": map[string]any{
 			"version":    version,
 			"updated_at": updatedAt,
-			"count":      count,
+			"count":      len(visible),
 			"read_only":  true,
+			"restricted": restricted,
 		},
 	})
 }
 
-// handleNodes 是客户端的唯一数据入口：只读节点池。
+// handleNodes 是客户端的唯一数据入口：只读，且按权限组过滤。
 // ?version=<上次拿到的版本> 命中时只回 unchanged，省一次流量。
+//
+// version 是「节点池全局版本」，权限组或账号归属变化时会被推高一格，
+// 所以客户端不需要知道 ACL 的存在也能在权限变化后重新拉取。
 func (s *Server) handleNodes(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeErr(w, http.StatusMethodNotAllowed, "method_not_allowed", "只支持 GET；节点由管理员维护，客户端无上传接口")
 		return
 	}
-	if s.requireUser(w, r) == nil {
+	u := s.requireUser(w, r)
+	if u == nil {
 		return
 	}
 	version, updatedAt, _ := s.nodes.Version()
@@ -243,15 +297,13 @@ func (s *Server) handleNodes(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	list := s.nodes.List()
-	if list == nil {
-		list = []NodeSummary{}
-	}
+	list, restricted := s.visibleNodes(u)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"version":    version,
 		"updated_at": updatedAt,
 		"count":      len(list),
 		"read_only":  true,
+		"restricted": restricted,
 		"nodes":      list,
 	})
 }

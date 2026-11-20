@@ -132,12 +132,20 @@ func (s *NodeStore) Version() (int64, int64, int) {
 }
 
 // List 返回启用中的节点摘要，按 Order 排序。
-func (s *NodeStore) List() []NodeSummary {
+func (s *NodeStore) List() []NodeSummary { return s.ListByIDs(nil) }
+
+// ListByIDs 返回 allow 集合内的启用节点，按 Order 排序。
+// allow == nil 表示不做过滤（管理员 / 未分组的兼容模式）。
+// 注意：过滤发生在「启用」判断之后——权限组里列了但被停用的节点依然不下发。
+func (s *NodeStore) ListByIDs(allow map[string]bool) []NodeSummary {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	out := make([]NodeSummary, 0, len(s.nodes))
 	for _, n := range s.nodes {
 		if !n.Enabled {
+			continue
+		}
+		if allow != nil && !allow[n.ID] {
 			continue
 		}
 		out = append(out, NodeSummary{
@@ -146,6 +154,34 @@ func (s *NodeStore) List() []NodeSummary {
 		})
 	}
 	return out
+}
+
+// MissingIDs 返回节点池里不存在的 id。权限组保存前用它做校验，
+// 避免管理员把打错的 id 存进配置（那种错配只会表现为「用户看不到节点」）。
+func (s *NodeStore) MissingIDs(ids []string) []string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	have := make(map[string]bool, len(s.nodes))
+	for _, n := range s.nodes {
+		have[n.ID] = true
+	}
+	missing := make([]string, 0)
+	for _, id := range ids {
+		if id == "" || have[id] {
+			continue
+		}
+		missing = append(missing, id)
+	}
+	return missing
+}
+
+// BumpVersion 只把版本号推一格，不碰节点数据。
+// 权限组变化时用它让客户端的 ?version= 增量判断失效，从而重新拉一次节点。
+func (s *NodeStore) BumpVersion() (int64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.touchLocked()
+	return s.version, s.saveLocked()
 }
 
 // ListAll 是管理端视图：包含禁用项与时间戳。

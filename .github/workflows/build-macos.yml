@@ -1,0 +1,122 @@
+name: Build macOS
+
+# macOS 产物（RekoBox.app + dmg）。ad-hoc 签名，不带公证：
+#   - 有 Developer ID + 公证的正式发布走本地或手动流程（见 RekoboxForMac/docs/HANDOFF.md §7）
+#   - 这里只保证「能编出来、能下载」，产物首次打开需要右键 → 打开
+on:
+  workflow_dispatch:
+    inputs:
+      make_dmg:
+        description: "同时打 dmg"
+        required: false
+        default: "true"
+  push:
+    tags:
+      - 'v*'
+    branches:
+      - main
+    paths:
+      - 'RekoboxForMac/**'
+      - 'RekoboxForWindows/**'
+      - '.github/workflows/build-macos.yml'
+
+concurrency:
+  group: macos-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build .app (arm64)
+    runs-on: macos-14          # Apple Silicon runner
+    defaults:
+      run:
+        working-directory: RekoboxForWindows
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          submodules: recursive
+
+      # protobuf 21.4 的 cmake_minimum_required 是 3.5，CMake 4 已经不支持；
+      # runner 自带的 cmake 若是 4.x 就换成 3.31.6（HANDOFF §3 Step 0 有说明）
+      - name: Ensure CMake 3.x
+        run: |
+          v=$(cmake --version | head -1 | sed 's/[^0-9.]//g')
+          echo "runner cmake: $v"
+          major=${v%%.*}
+          if [ "$major" -ge 4 ]; then
+            echo "CMake $v 不兼容 protobuf 21.4，安装 3.31.6"
+            curl -fL -o /tmp/cmake.tar.gz \
+              https://github.com/Kitware/CMake/releases/download/v3.31.6/cmake-3.31.6-macos-universal.tar.gz
+            mkdir -p "$HOME/cmake3" && tar xzf /tmp/cmake.tar.gz -C "$HOME/cmake3" --strip-components=1
+            echo "$HOME/cmake3/CMake.app/Contents/bin" >> "$GITHUB_PATH"
+          fi
+          cmake --version | head -1
+
+      - name: Ensure Ninja
+        run: |
+          command -v ninja >/dev/null || brew install ninja
+          ninja --version
+
+      - name: Install Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.24'
+          cache-dependency-path: RekoboxForWindows/go/cmd/rekobox_core/go.sum
+
+      - name: Qt cache
+        id: qt-cache
+        uses: actions/cache@v5
+        with:
+          path: ~/Qt/6.7.2/macos
+          key: qt-6.7.2-macos-arm64-v1
+
+      - name: Install Qt 6.7.2
+        if: steps.qt-cache.outputs.cache-hit != 'true'
+        run: |
+          python3 -m pip install --user aqtinstall
+          python3 -m aqt install-qt mac desktop 6.7.2 clang_64 -O ~/Qt \
+            --archives qtbase qtsvg qttools qttranslations
+
+      # 三个 C++ 依赖（zxing / yaml-cpp / protobuf）编一次约十几分钟，缓存掉
+      - name: Deps cache
+        id: deps-cache
+        uses: actions/cache@v5
+        with:
+          path: RekoboxForWindows/libs/deps/built
+          key: deps-${{ hashFiles('RekoboxForWindows/libs/build_deps_macos.sh', 'RekoboxForWindows/libs/get_source_env.sh') }}
+
+      - name: Build C++ deps
+        if: steps.deps-cache.outputs.cache-hit != 'true'
+        run: bash libs/build_deps_macos.sh
+
+      - name: Fetch kernel sources
+        run: bash libs/get_source_local.sh
+
+      - name: Build .app + dmg
+        run: |
+          bash libs/build_macos.sh --dmg
+          ls -lh ../RekoboxForMac/dist/
+
+      - name: Verify signature
+        run: |
+          APP=../RekoboxForMac/build/RekoBox.app
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          codesign -dv "$APP" 2>&1 | grep -E 'Identifier|Signature|Format'
+
+      - name: Upload dmg
+        uses: actions/upload-artifact@v7
+        with:
+          name: RekoBox-macos-arm64-dmg
+          path: RekoboxForMac/dist/*.dmg
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload app (zip)
+        run: ditto -c -k --keepParent ../RekoboxForMac/build/RekoBox.app RekoBox-macos-arm64.zip
+      - uses: actions/upload-artifact@v7
+        with:
+          name: RekoBox-macos-arm64-app
+          path: RekoboxForWindows/RekoBox-macos-arm64.zip
+          if-no-files-found: error
+          retention-days: 14

@@ -149,6 +149,9 @@ fi
 
 # ---------------------------------------------------------------- 6. 签名（ad-hoc）
 step "ad-hoc 签名"
+# 早期构建会在 bundle 里留一个断链的 updater -> launcher（Linux 才需要），
+# 断链符号链接会让 codesign --deep 校验失败（真机报"已损坏"），每次构建清掉
+rm -f "$APP/Contents/MacOS/updater"
 codesign --force --sign - "$APP/Contents/MacOS/rekobox_core"
 codesign --force --deep --sign - "$APP"
 codesign -dv --verbose=2 "$APP" 2>&1 | head -5 || true
@@ -159,8 +162,16 @@ if [ "$DO_DMG" = "1" ]; then
     mkdir -p "$DIST"
     DMG="$DIST/Rekobox-$NKR_VERSION-mac-arm64.dmg"
     rm -f "$DMG"
-    hdiutil create -volname "RekoBox" -srcfolder "$APP" -ov -format UDZO "$DMG"
-    echo "产物: $DMG"
+
+    # 铺一个临时目录：app + /Applications 快捷方式，用户拖一下就装好。
+    # 用 ditto 而不是 cp -R：后者会丢扩展属性，签名跟着一起坏。
+    STAGE="$(mktemp -d "${TMPDIR:-/tmp}/rekobox-dmg.XXXXXX")"
+    trap 'rm -rf "$STAGE"' EXIT
+    ditto "$APP" "$STAGE/RekoBox.app"
+    ln -s /Applications "$STAGE/Applications"
+
+    hdiutil create -volname "RekoBox" -srcfolder "$STAGE" -ov -format UDZO "$DMG" >/dev/null
+    echo "产物: $DMG ($(du -h "$DMG" | cut -f1))"
 fi
 
 echo

@@ -10,6 +10,12 @@ dist/
 **/.gradle/
 **/.kotlin/
 **/local.properties
+# libs/make_icns.sh 从 res/public/rekobox.png 生成，不入库（1MB 二进制，改一次脏一次历史）
+RekoboxForWindows/res/rekobox.icns
+# 内核三方源码（libs/get_source_local.sh 拉取）
+/sing-box/
+/RekoboxForWindows/sing-box/
+/RekoboxForWindows/_deps/
 
 # 系统文件
 .DS_Store

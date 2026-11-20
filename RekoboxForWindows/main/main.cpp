@@ -109,9 +109,14 @@ int main(int argc, char* argv[]) {
         QFile::remove("updater.old");
     }
 #ifndef Q_OS_WIN
+#ifndef Q_OS_MACOS
+    // Linux 用 launcher/updater 脚本做自动更新。
+    // macOS 没有 launcher，建这个链接会变成 **断链符号链接**，直接破坏
+    // codesign --deep 的校验（真机 Gatekeeper 会报"已损坏"），所以不做。
     if (!QFile::exists("updater")) {
         QFile::link("launcher", "updater");
     }
+#endif
 #endif
 
     // Flags

@@ -22,7 +22,19 @@ bash RekoboxForWindows/libs/build_macos.sh        # 编 .app
 bash RekoboxForWindows/libs/build_macos.sh --dmg  # 顺带出 dmg
 ```
 
-产物：`build/RekoBox.app`。源码在 `../RekoboxForWindows/`（桌面共享树，不复制副本）。
+产物：`build/RekoBox.app`；加 `--dmg` 会在 `dist/` 出 `Rekobox-<版本>-mac-arm64.dmg`
+（里面是 app + `/Applications` 快捷方式，拖进去就装好）。源码在 `../RekoboxForWindows/`
+（桌面共享树，不复制副本）。
+
+### 安装说明（重要）
+
+产物是 **ad-hoc 签名**，没有 Developer ID、没公证。装好第一次打开要：
+
+- 右键点 `RekoBox.app` → **打开** → 弹窗里再点"打开"；或
+- 终端里 `xattr -dr com.apple.quarantine /Applications/RekoBox.app`
+
+不这么做会提示"无法验证开发者"。它不会报"已损坏"——那说明签名坏了（比如 bundle 里
+有断链符号链接），`codesign --verify --deep --strict RekoBox.app` 能查出来。
 
 ## 目录
 

@@ -313,6 +313,7 @@ bash RekoboxForWindows/libs/build_macos.sh --dmg
 | 退出时必崩：崩溃报告 `aboutToQuit → QProcess::waitForFinished → ~QSocketNotifier`，SIGSEGV | `aboutToQuit` 里调 `waitForFinished()` 会跑嵌套事件循环，`QProcess` 通道的 notifier 在析构阶段踩空 | 只 `kill()` 不 wait：SIGKILL 一样立即释放端口（已修） |
 | 崩过一次之后，**再点图标就再也起不来**（无窗口、无报错、进程秒退） | `RunGuard` 用 `QSharedMemory`，进程被信号杀死时共享内存段不会释放；下次启动判定"已有实例"，去唤醒本地 socket 又连不上，于是 `return 0` 静默退出 | mac 改用固定名字的 `QLocalServer`（`rekoboxlocalserver-lock`）加锁：残留套接字文件可安全清掉，第二个实例连上来时抬起已有窗口（已修，`kill -9` 后可直接再启动） |
 | 想接管系统 DNS：把 DNS 指到 tun 地址后**整机解析全挂**，`dig @172.19.0.1` 超时 | ① `172.19.0.1` 是 utun **自己的**地址，内核本地投递、包根本不进 utun；同网段的 `172.19.0.2` 也不应答；② sing-box 的 `dns-direct` 走"系统 DNS"，改完变成**自己查自己**（`lsof -i:53` 能看到 `rekobox_c` 在往 `172.19.0.1:53` 发查询） | **放弃该方案**（代码保留但不再启用，只做残留清理）。真要接管 DNS，得在 tun 内核里另起 `127.0.0.1:53` 监听（`direct` 入站 + `override_address` + 路由到 `dns-out`），并把 `core_box_underlying_dns` 固定成真实上游，不能留 `local` |
+| `codesign --verify --deep --strict` 报 `RekoBox.app: No such file or directory`（文件明明在）；真机 Gatekeeper 可能直接报"已损坏" | bundle 里有个**断链符号链接** `Contents/MacOS/updater → launcher`：`main.cpp` 里给 Linux 准备的 `QFile::link("launcher","updater")` 在 mac 上没有 launcher 可指 | `main.cpp` 用 `#ifndef Q_OS_MACOS` 跳过；`build_macos.sh` 签名前 `rm -f "$APP/Contents/MacOS/updater"` 清历史残留（已修，修完 deep 校验静默通过） |
 
 ### 4.2 可能还会撞上的
 
@@ -399,9 +400,15 @@ RekoboxForMac/                     ← 只放 mac 专属的东西，不放源码
 
 **P3**
 
-- [ ] Developer ID 签名 + `notarytool` 公证 + `stapler`（要账号）
-- [ ] `.github/workflows/build-macos.yml`（macos-14 runner，ad-hoc 产物）
-- [ ] `RekoboxForMac/build/`、`dist/`、`res/rekobox.icns` 的 gitignore 策略
+- [ ] Developer ID 签名 + `notarytool` 公证 + `stapler`（要账号，$99/年；没有就走 ad-hoc）
+- [x] `.github/workflows/build-macos.yml`（macos-14 runner，ad-hoc 产物：dmg + app zip）
+- [x] `RekoboxForMac/build/`、`dist/`、`res/rekobox.icns` 的 gitignore 策略
+- [x] `build_macos.sh --dmg`：dmg 里带 `/Applications` 快捷方式（拖拽安装）+ `ditto` 拷贝保签名
+
+**P3 现状**：ad-hoc 产物已可用。用户拿到 dmg 后首次要**右键 → 打开**（或
+`xattr -dr com.apple.quarantine /Applications/RekoBox.app`）——ad-hoc 签名过不了
+Gatekeeper 的"已验证开发者"检查，但不会再报"已损坏"。要免这一步只能买 Developer ID
+走公证，流程见 `docs/06-macos-port.md` §7，`hdiutil/codesign/notarytool` 三条命令都在那儿。
 
 **P4**
 

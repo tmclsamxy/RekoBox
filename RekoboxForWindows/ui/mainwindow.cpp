@@ -798,6 +798,13 @@ void MainWindow::neko_set_spmode_vpn(bool enable, bool save) {
         if (enable) {
             if (NekoGui::dataStore->vpn_internal_tun) {
                 bool requestPermission = !NekoGui::IsAdmin();
+#ifdef Q_OS_MACOS
+                // macOS 上进程永远不是 root，提权是在 StartVPNProcess() 里用
+                // osascript "with administrator privileges" 做的（会弹系统密码框）。
+                // 这里如果要求预先拿到 root，就会落到下面那个 neko_set_spmode_FAILED——
+                // 因为 Linux/Win 的提权分支都不参与 mac 编译，表现就是"勾选后自动弹回、不弹框"。
+                requestPermission = false;
+#endif
                 if (requestPermission) {
 #ifdef Q_OS_LINUX
                     if (!Linux_HavePkexec()) {
@@ -1832,7 +1839,8 @@ bool MainWindow::StartVPNProcess() {
         return true;
     }
     //
-    auto configPath = NekoGui::WriteVPNSingBoxConfig();
+    // 节点地址要传给 tun 配置生成：它得被排除在 tun 路由外，否则主内核连节点会回环
+    auto configPath = NekoGui::WriteVPNSingBoxConfig(running != nullptr ? running->bean->serverAddress : QString());
     auto scriptPath = NekoGui::WriteVPNLinuxScript(configPath);
     //
 #ifdef Q_OS_WIN

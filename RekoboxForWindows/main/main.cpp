@@ -243,6 +243,14 @@ int main(int argc, char* argv[]) {
     // Datastore & Flags
     if (NekoGui::dataStore->start_minimal) NekoGui::dataStore->flag_tray = true;
 
+#ifdef Q_OS_MACOS
+    // "Internal Tun"（主内核自己加 tun 入站）要求进程本身是 root，而 mac 上永远不是。
+    // 打开它只会得到 "configure tun interface: Connect: operation not permitted"。
+    // mac 必须走两进程模型：主内核管 socks，另起一个 root 内核建 utun。
+    // 老配置里可能存着 true，这里强制纠正。
+    NekoGui::dataStore->vpn_internal_tun = false;
+#endif
+
     // load routing
     NekoGui::dataStore->routing = std::make_unique<NekoGui::Routing>();
     NekoGui::dataStore->routing->fn = ROUTES_PREFIX + NekoGui::dataStore->active_routing;

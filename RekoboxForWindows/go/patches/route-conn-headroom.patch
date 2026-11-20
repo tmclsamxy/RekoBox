@@ -1,0 +1,23 @@
+diff --git a/route/conn.go b/route/conn.go
+index abee12e..a506800 100644
+--- a/route/conn.go
++++ b/route/conn.go
+@@ -16,6 +16,7 @@ import (
+ 	"github.com/sagernet/sing-box/common/dialer"
+ 	"github.com/sagernet/sing-box/common/tlsfragment"
+ 	C "github.com/sagernet/sing-box/constant"
++	"github.com/sagernet/sing-box/neko_headroom"
+ 	"github.com/sagernet/sing/common"
+ 	"github.com/sagernet/sing/common/buf"
+ 	"github.com/sagernet/sing/common/bufio"
+@@ -349,7 +350,9 @@ func (m *ConnectionManager) connectionCopyEarly(source net.Conn, destination io.
+ }
+ 
+ func (m *ConnectionManager) packetConnectionCopy(ctx context.Context, source N.PacketReader, destination N.PacketWriter, direction bool, done *atomic.Bool, onClose N.CloseHandlerFunc) {
+-	_, err := bufio.CopyPacket(destination, source)
++	// neko_headroom：sing v0.7.18 的 waiter 快路径不给回程 buffer 留头部空间，
++	// 写给 SOCKS UDP 客户端时会 panic（mac TUN 两进程模型必现），这里兜一层
++	_, err := bufio.CopyPacket(neko_headroom.Ensure(destination), source)
+ 	if !direction {
+ 		if err == nil {
+ 			m.logger.DebugContext(ctx, "packet upload finished")

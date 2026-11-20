@@ -21,6 +21,11 @@ DialogVPNSettings::DialogVPNSettings(QWidget *parent) : QDialog(parent), ui(new 
 #endif
     ui->strict_route->setChecked(NekoGui::dataStore->vpn_strict_route);
     ui->single_core->setChecked(NekoGui::dataStore->vpn_internal_tun);
+#ifdef Q_OS_MACOS
+    // mac 上这条选项永远不可能生效（主程序不是 root，建不了 utun），
+    // 露出来只会让人勾了之后收到 "operation not permitted"，直接隐藏
+    ui->single_core->setVisible(false);
+#endif
     //
     D_LOAD_STRING_PLAIN(vpn_rule_cidr)
     D_LOAD_STRING_PLAIN(vpn_rule_process)

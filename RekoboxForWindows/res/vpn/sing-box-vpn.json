@@ -66,6 +66,7 @@
             //%IPV6_ADDRESS%
             "mtu": %MTU%,
             "auto_route": true,
+            //%ROUTE_EXCLUDE%
             "strict_route": %STRICT_ROUTE%,
             "stack": "%STACK%",
             "endpoint_independent_nat": true,

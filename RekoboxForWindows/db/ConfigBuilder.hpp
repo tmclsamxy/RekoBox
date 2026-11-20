@@ -57,7 +57,8 @@ namespace NekoGui {
     QString BuildChainInternal(int chainId, const QList<std::shared_ptr<ProxyEntity>> &ents,
                                const std::shared_ptr<BuildConfigStatus> &status);
 
-    QString WriteVPNSingBoxConfig();
+    // serverAddress: 当前节点的地址，用于把它从 tun 路由里排除（见 .cpp 里的注释）
+    QString WriteVPNSingBoxConfig(const QString &serverAddress = {});
 
     QString WriteVPNLinuxScript(const QString &configPath);
 } // namespace NekoGui

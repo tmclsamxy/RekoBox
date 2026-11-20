@@ -6,6 +6,8 @@
 #include <QApplication>
 #include <QFile>
 #include <QFileInfo>
+#include <QHostAddress>
+#include <QHostInfo>
 
 #define BOX_UNDERLYING_DNS dataStore->core_box_underlying_dns.isEmpty() ? "local" : dataStore->core_box_underlying_dns
 
@@ -775,7 +777,51 @@ namespace NekoGui {
         if (!experimentalObj.isEmpty()) status->result->coreConfig.insert("experimental", experimentalObj);
     }
 
-    QString WriteVPNSingBoxConfig() {
+    QStringList buildTunRouteExclude(const QString &serverAddress) {
+        // tun 一起，整机流量都会被劫进 utun。但**主内核连节点的那条 TCP 会被重复抓取**：
+        //   tun 抓包 → socks 2080 → 主内核去连节点 → 又被 tun 抓走 → 无限回环
+        // 表现就是所有连接 context deadline exceeded、日志刷屏、整机不可用。
+        //
+        // 为什么 auto_detect_interface 救不了：那只保护 tun 内核**自己**发出的连接
+        // （把 socket 绑到物理网卡）。mac 上 tun 内核是独立 root 进程，主内核是另一个
+        // 用户态进程，它的 socket 不归 tun 内核管。
+        // nekoray 原本靠 route 里的 process_name 排除自己，但这一版 sing-tun 在 darwin
+        // 上不提供 ProcessInfo，process_name 规则在 mac 上是空转的（实测）。
+        //
+        // 所以从路由层面挖洞：节点地址 + 局域网直连，其余照常走 tun。
+        QStringList out{"127.0.0.0/8", "192.168.0.0/16", "10.0.0.0/8",
+                        "172.16.0.0/12", "169.254.0.0/16", "224.0.0.0/4"};
+        auto addAddr = [&out](const QHostAddress &addr) {
+            if (addr.isNull()) return;
+            switch (addr.protocol()) {
+                case QAbstractSocket::IPv4Protocol:
+                    out << addr.toString() + "/32";
+                    break;
+                case QAbstractSocket::IPv6Protocol:
+                    out << addr.toString() + "/128";
+                    break;
+                default:
+                    break;
+            }
+        };
+
+        auto host = serverAddress.trimmed();
+        if (host.isEmpty()) return out;
+
+        QHostAddress literal(host);
+        if (!literal.isNull()) {
+            addAddr(literal);
+            return out;
+        }
+
+        // 域名节点：TUN 起步时多等一次解析，换取之后不回环
+        for (const auto &addr: QHostInfo::fromName(host).addresses()) {
+            addAddr(addr);
+        }
+        return out;
+    }
+
+    QString WriteVPNSingBoxConfig(const QString &serverAddress) {
         // tun user rule
         auto match_out = dataStore->vpn_rule_white ? "neko-socks" : "direct";
         auto no_match_out = dataStore->vpn_rule_white ? "direct" : "neko-socks";
@@ -807,8 +853,16 @@ namespace NekoGui {
         // gen config
         auto configFn = ":/neko/vpn/sing-box-vpn.json";
         if (QFile::exists("vpn/sing-box-vpn.json")) configFn = "vpn/sing-box-vpn.json";
+
+        // 节点地址不进 tun 路由，否则主内核连节点会被 tun 再抓一次形成回环
+        auto excludeList = buildTunRouteExclude(serverAddress);
+        QStringList quoted;
+        for (const auto &cidr: excludeList) quoted << QStringLiteral("\"%1\"").arg(cidr);
+        auto route_exclude = QStringLiteral(R"("route_exclude_address": [%1],)").arg(quoted.join(", "));
+
         auto config = ReadFileText(configFn)
                           .replace("//%IPV6_ADDRESS%", dataStore->vpn_ipv6 ? R"("inet6_address": "fdfe:dcba:9876::1/126",)" : "")
+                          .replace("//%ROUTE_EXCLUDE%", route_exclude)
                           .replace("//%SOCKS_USER_PASS%", socks_user_pass)
                           .replace("//%PROCESS_NAME_RULE%", process_name_rule)
                           .replace("//%CIDR_RULE%", cidr_rule)

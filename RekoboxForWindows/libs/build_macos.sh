@@ -65,10 +65,9 @@ fi
 step "编译内核 rekobox_core（darwin/arm64）"
 mkdir -p "$OUT/core"
 if [ -d "$SINGBOX_SRC" ]; then
-    if [ ! -d "$SINGBOX_SRC/neko" ]; then
-        echo "sing-box 树里没有 neko 包，执行 overlay"
-        bash "$ROOT/libs/apply_neko_patch.sh" || die "apply_neko_patch.sh 失败"
-    fi
+    # 每次都比对一次 overlay + 补丁（脚本幂等）：neko 包没了要补，route/conn.go 的
+    # headroom 补丁没打过也要补——后者不打，mac TUN 的 UDP 回程会直接 panic
+    bash "$ROOT/libs/apply_neko_patch.sh" || die "apply_neko_patch.sh 失败"
     ( cd "$ROOT/go/cmd/rekobox_core" \
       && CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 \
          go build -trimpath \

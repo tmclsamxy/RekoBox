@@ -462,8 +462,11 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
     connect(qApp, &QCoreApplication::aboutToQuit, this, [this] {
         NekoGui::dataStore->prepare_exit = true;
         if (core_process != nullptr && core_process->state() != QProcess::NotRunning) {
+            // 这里只能 kill，**不能** waitForFinished：aboutToQuit 触发时事件循环已在退出，
+            // waitForFinished 会跑嵌套循环，QProcess 通道的 QSocketNotifier 在析构阶段
+            // 踩空 → SIGSEGV（2026-11-20 实测崩溃报告：aboutToQuit → waitForFinished →
+            // ~QSocketNotifier）。kill 是 SIGKILL，进程一样会立刻死，端口也会释放。
             core_process->kill();
-            core_process->waitForFinished(2000);
         }
     });
 
@@ -1875,6 +1878,14 @@ bool MainWindow::StartVPNProcess() {
 #endif
     vpn_process->waitForStarted();
     vpn_pid = vpn_process->processId(); // actually it's pkexec or bash PID
+
+#ifdef Q_OS_MACOS
+    // tun 起来后接管系统 DNS（sing-tun 在 darwin 上不给 utun 下发 DNS）。
+    // 延迟一点：utun 还没建好就把 DNS 指过去，中间会有一两秒解析失败。
+    QTimer::singleShot(1200, this, [this] {
+        if (vpn_pid != 0) NekoGui_mac::ApplyTunDNS(true);
+    });
+#endif
 #endif
     return true;
 }
@@ -1883,6 +1894,11 @@ bool MainWindow::StopVPNProcess(bool unconditional) {
     if (unconditional || vpn_pid != 0) {
         bool ok;
         core_process->processId();
+#ifdef Q_OS_MACOS
+        // 先把 DNS 还原，再杀 tun 内核。反过来会有一小段"DNS 指向已经消失的网卡"，
+        // 那段时间整个系统解析不了域名
+        NekoGui_mac::ApplyTunDNS(false);
+#endif
 #ifdef Q_OS_WIN
         auto ret = WinCommander::runProcessElevated("taskkill", {"/IM", "rekobox_core.exe",
                                                                  "/FI",

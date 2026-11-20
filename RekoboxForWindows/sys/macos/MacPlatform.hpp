@@ -20,4 +20,14 @@ namespace NekoGui_mac {
     // 转义成 AppleScript 双引号字符串的内容（do shell script "..."）
     QString AppleScriptString(const QString &s);
 
+    // TUN 模式下接管系统 DNS。
+    // 背景：sing-tun 在 darwin 上不会给 utun 下发 DNS（Linux/Windows 才会），
+    // 不接管的话域名仍由路由器解析——既可能被污染，也是明文泄漏。
+    // enable=true：把各网络服务的 DNS 指向 tun 地址，并把原值落盘（tun-dns-state.json）；
+    // enable=false：按快照还原（原本是 DHCP 的要还原成 Empty，不是写死某个 IP）。
+    void ApplyTunDNS(bool enable);
+
+    // 启动时清理上次异常退出（崩溃 / 强杀）留下的 DNS 改动，否则整机解析不了域名
+    void RecoverTunDNSIfNeeded();
+
 } // namespace NekoGui_mac

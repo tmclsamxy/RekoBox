@@ -168,13 +168,48 @@ int main(int argc, char* argv[]) {
     // 这一步必须在开窗口之前跑完：清干净再让用户看到"已连接"。
     RecoverSystemProxyIfNeeded();
 
+#ifdef Q_OS_MACOS
+    // TUN 模式会把系统 DNS 指向 tun 地址；崩在 TUN 开着的时候，这一步负责救回来
+    NekoGui_mac::RecoverTunDNSIfNeeded();
+#endif
+
     // dispatchers
     DS_cores = new QThread;
     DS_cores->start();
 
-    // RunGuard
-    RunGuard guard("rekobox" + wd.absolutePath());
+    // 单实例
     quint64 guard_data_in = GetRandomUint64();
+#ifdef Q_OS_MACOS
+    // mac 上不用 RunGuard（QSharedMemory）：进程被信号杀死（崩溃/SIGTERM/强杀）时
+    // 共享内存段不会自动释放，之后每次启动都会判定"已有实例在跑"，唤醒又连不上，
+    // 于是静默 return 0 —— 用户看到的现象是"点了图标打不开"（2026-11-20 实测）。
+    // 改用固定名字的 QLocalServer 加锁：套接字文件在崩溃后是残留物，可以安全清掉。
+    static QLocalServer mac_instance_lock;
+    if (!NekoGui::dataStore->flag_many) {
+        const auto lock_name = QStringLiteral(LOCAL_SERVER_PREFIX "lock");
+        QLocalSocket probe;
+        probe.connectToServer(lock_name);
+        if (probe.waitForConnected(400)) {
+            probe.write("raise");
+            probe.waitForBytesWritten(300);
+            probe.disconnectFromServer();
+            qDebug() << "another instance is running, asked it to raise the window";
+            return 0;
+        }
+        QLocalServer::removeServer(lock_name); // 清掉上次崩溃留下的套接字文件
+        if (!mac_instance_lock.listen(lock_name)) {
+            qWarning() << "failed to create single-instance lock:" << mac_instance_lock.errorString();
+        }
+        QObject::connect(&mac_instance_lock, &QLocalServer::newConnection, &a, [&] {
+            while (auto conn = mac_instance_lock.nextPendingConnection()) {
+                conn->deleteLater();
+                MW_dialog_message("", "Raise"); // 第二个实例让我们把窗口抬起来
+            }
+        });
+    }
+    MF_release_runguard = [] {};
+#else
+    RunGuard guard("rekobox" + wd.absolutePath());
     quint64 guard_data_out = 0;
     if (!NekoGui::dataStore->flag_many && !guard.tryToRun(&guard_data_in)) {
         // Some Good System
@@ -195,6 +230,7 @@ int main(int argc, char* argv[]) {
         return 0;
     }
     MF_release_runguard = [&] { guard.release(); };
+#endif
 
 // icons
 #if (QT_VERSION >= QT_VERSION_CHECK(5, 11, 0))

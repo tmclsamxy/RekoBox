@@ -23,6 +23,12 @@ mkdir -p "$DEPS"
 cd "$DEPS"
 
 JOBS="$(sysctl -n hw.ncpu 2>/dev/null || echo 4)"
+
+# 不传这两个，依赖会按"本机 macOS 版本 + 本机架构"编，链接进 13.0 目标时
+# ld 会刷几百条 "was built for newer 'macOS' version (15.0) than being linked (13.0)"。
+# 统一到和主工程一致：arm64 / 13.0。
+DEP_FLAGS=(-DCMAKE_OSX_ARCHITECTURES="${NKR_ARCH:-arm64}"
+           -DCMAKE_OSX_DEPLOYMENT_TARGET="${NKR_MIN_MACOS:-13.0}")
 LOG="$DEPS/build.log"
 : > "$LOG"
 
@@ -36,6 +42,7 @@ if [ ! -d zxing-cpp-2.0.0 ]; then
 fi
 echo ">> zxing-cpp"
 cmake -S zxing-cpp-2.0.0 -B zxing-cpp-2.0.0/build -GNinja \
+      "${DEP_FLAGS[@]}" \
       -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF \
       -DBUILD_EXAMPLES=OFF -DBUILD_BLACKBOX_TESTS=OFF \
       -DCMAKE_INSTALL_PREFIX="$PREFIX" >> "$LOG" 2>&1 || { log_tail zxing; exit 1; }
@@ -50,6 +57,7 @@ if [ ! -d yaml-cpp-yaml-cpp-0.7.0 ]; then
 fi
 echo ">> yaml-cpp"
 cmake -S yaml-cpp-yaml-cpp-0.7.0 -B yaml-cpp-yaml-cpp-0.7.0/build -GNinja \
+      "${DEP_FLAGS[@]}" \
       -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF \
       -DYAML_CPP_BUILD_TESTS=OFF -DYAML_CPP_BUILD_TOOLS=OFF \
       -DCMAKE_INSTALL_PREFIX="$PREFIX" >> "$LOG" 2>&1 || { log_tail yaml; exit 1; }
@@ -64,6 +72,7 @@ if [ ! -d protobuf ]; then
 fi
 echo ">> protobuf 21.4（比较慢，约 5-10 分钟）"
 cmake -S protobuf -B protobuf/build -GNinja \
+      "${DEP_FLAGS[@]}" \
       -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF \
       -Dprotobuf_BUILD_TESTS=OFF -Dprotobuf_BUILD_EXAMPLES=OFF \
       -DCMAKE_INSTALL_PREFIX="$PREFIX" >> "$LOG" 2>&1 || { log_tail protobuf; exit 1; }

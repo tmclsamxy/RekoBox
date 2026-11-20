@@ -21,7 +21,7 @@ Rekobox/
 |---|---|---|
 | **Android** | `RekoboxForAndroid/` | v1.0.1 已发布；`io.rekobox`，4 个 split ABI；改名基于 NekoBox |
 | **Windows** | `RekoboxForWindows/` | nekoray 4.0.1 移植：Qt6.7 + MinGW 构建通过，与 Android 共用 sing-box 内核（含 VLESS Encryption / Vision），已实机运行 |
-| **macOS** | `RekoboxForMac/` | 骨架已完成（Apple Silicon / arm64），**尚未在 Mac 上编译**。方案 [`docs/06-macos-port.md`](docs/06-macos-port.md)，交接 [`RekoboxForMac/docs/HANDOFF.md`](RekoboxForMac/docs/HANDOFF.md)，效果图在 `RekoboxForMac/mockups/`。源码复用 `RekoboxForWindows/`（CMake 按平台分支，不复制副本） |
+| **macOS** | `RekoboxForMac/` | Apple Silicon / arm64，**已在 M2（macOS 15.7.5）编译通过并启动**，界面一致；TUN / 系统代理待验证。方案 [`docs/06-macos-port.md`](docs/06-macos-port.md)，交接 [`RekoboxForMac/docs/HANDOFF.md`](RekoboxForMac/docs/HANDOFF.md)，效果图在 `RekoboxForMac/mockups/`。源码复用 `RekoboxForWindows/`（CMake 按平台分支，不复制副本） |
 
 ## 发布
 

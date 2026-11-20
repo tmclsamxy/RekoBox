@@ -306,6 +306,20 @@ set_target_properties(rekobox PROPERTIES
 
 # macOS：app bundle（qt_add_executable 在 mac 上默认已开 MACOSX_BUNDLE，这里补元数据）
 if (APPLE)
+    # Info.plist 自己 configure：内建的 @MACOSX_BUNDLE_xxx@ 隐式变量在
+    # qt_add_executable(MANUAL_FINALIZATION) 下不会被定义，直接用会得到空串
+    set(NKR_BUNDLE_EXECUTABLE "RekoBox")
+    set(NKR_BUNDLE_IDENTIFIER "io.rekobox.mac")
+    set(NKR_BUNDLE_NAME "RekoBox")
+    set(NKR_BUNDLE_ICON "rekobox.icns")
+    set(NKR_BUNDLE_VERSION "${NKR_RC_VERSION}")
+    if (NOT NKR_MIN_MACOS)
+        set(NKR_MIN_MACOS "${CMAKE_OSX_DEPLOYMENT_TARGET}")
+    endif ()
+    set(NKR_BUNDLE_PLIST "${CMAKE_BINARY_DIR}/macos/Info.plist")
+    configure_file("${CMAKE_CURRENT_SOURCE_DIR}/cmake/macos/Info.plist.in"
+            "${NKR_BUNDLE_PLIST}" @ONLY)
+
     set_target_properties(rekobox PROPERTIES
             OUTPUT_NAME "RekoBox"
             MACOSX_BUNDLE TRUE
@@ -314,7 +328,7 @@ if (APPLE)
             MACOSX_BUNDLE_ICON_FILE "rekobox.icns"
             MACOSX_BUNDLE_BUNDLE_VERSION "${NKR_RC_VERSION}"
             MACOSX_BUNDLE_SHORT_VERSION_STRING "${NKR_RC_VERSION}"
-            MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/cmake/macos/Info.plist.in"
+            MACOSX_BUNDLE_INFO_PLIST "${NKR_BUNDLE_PLIST}"
     )
 endif ()
 

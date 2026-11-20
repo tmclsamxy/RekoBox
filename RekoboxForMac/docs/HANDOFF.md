@@ -9,8 +9,11 @@
 
 ## 0. 一句话状态
 
-**骨架已搭完，一行都没编译过。** 下一步是拿到 M2 上跑
-`bash RekoboxForWindows/libs/build_macos.sh`，把第一次编译的错误清干净，看到窗口。
+**已在 M2 上编译通过并跑起来了**（macOS 15.7.5 / arm64，Qt 6.7.2），
+`RekoboxForMac/build/RekoBox.app` 能启动，界面与 A1 图一致（M1 验收清单见 §3 Step 4）。
+第一次编译只撞到 3 个问题，修法都进了 §4 的表。
+
+下一步是 P2：系统代理退出还原、TUN 实机验证（见 §7）。
 
 macOS 端不新建工程：直接给 `RekoboxForWindows/`（桌面共享树）加 `APPLE` 分支，
 同一套 Qt 6.7 Widgets 源码编出 `.app`。
@@ -84,6 +87,17 @@ mkdir -p ~/Rekobox && cd ~/Rekobox && unzip ~/Downloads/Rekobox-mac-dev.zip
 | `RekoboxForWindows/libs/make_icns.sh` | png → icns（只能在 mac 跑） | 语法检查，**未执行** |
 | `README.md` / `RekoboxForMac/README.md` | 平台表、文档表、状态 | 文档 |
 
+### 1.1 2026-11-20 首次编译（M2 / macOS 15.7.5）实测结论
+
+| 项 | 结果 |
+|---|---|
+| 工具链 | 不用 sudo：cmake 3.31.6 + ninja 1.12.1 + go 1.27.4 解压到 `~/tools`，Qt 6.7.2 用 aqt 装 `~/Qt` |
+| 三个 C++ 依赖 | 全部编译通过；须补 `-DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=13.0`（见 §4） |
+| 内核 rekobox_core | 编译通过（33 MB，arm64），`grpc server listening` 正常 |
+| 主工程 | 编译链接一次通过，无 C++/CMake 语法错误；只修了 Info.plist 与图标拷贝两处 |
+| 界面 | 工具栏四图标正常、Fusion 观感、五列表格、状态栏、日志面板均正常（见 §3 Step 4） |
+| 签名 | ad-hoc；`Identifier=io.rekobox.mac`（修 Info.plist 之前是自动生成 ID） |
+
 **"未编译"是字面意思**：写这份文档的机器是 Windows，没有 Qt/macOS 工具链，
 所有 C++/CMake 改动只做过人工审查。第一次 `cmake` 一定有要修的地方，见 §4。
 
@@ -133,6 +147,28 @@ python3 -m pip install --user aqtinstall
 python3 -m aqt install-qt mac desktop 6.7.2 clang_64 -O ~/Qt \
         --archives qtbase qtsvg qttools
 ```
+
+**没有 Homebrew / 不想动系统**时的等价做法（2026-11-20 实测，全程不需要 sudo）：
+
+```bash
+mkdir -p ~/tools/bin ~/tools/dl && cd ~/tools/dl
+curl -fL -o go.tar.gz    https://go.dev/dl/go1.27.4.darwin-arm64.tar.gz
+curl -fL -o cmake.tar.gz https://github.com/Kitware/CMake/releases/download/v3.31.6/cmake-3.31.6-macos-universal.tar.gz
+curl -fL -o ninja.zip    https://github.com/ninja-build/ninja/releases/download/v1.12.1/ninja-mac.zip
+
+tar xzf go.tar.gz -C ~/tools
+mkdir -p ~/tools/cmake && tar xzf cmake.tar.gz -C ~/tools/cmake --strip-components=1
+unzip -oq ninja.zip -d ~/tools/bin
+ln -sf ~/tools/go/bin/go ~/tools/bin/go
+ln -sf ~/tools/cmake/CMake.app/Contents/bin/cmake ~/tools/bin/cmake
+
+export PATH=$HOME/tools/bin:$PATH          # 建议写进 ~/.zshrc
+python3 -m pip install --user aqtinstall
+python3 -m aqt install-qt mac desktop 6.7.2 clang_64 -O ~/Qt --archives qtbase qtsvg qttools
+```
+
+> CMake 锁 3.31.x 而不是 4.x：protobuf 21.4 的 `cmake_minimum_required` 是 3.5，
+> CMake 4 已经不支持 3.5 以下（且会报 deprecated 错误），别升。
 
 自检：
 
@@ -230,6 +266,17 @@ bash RekoboxForWindows/libs/build_macos.sh --dmg
 先看 `RekoboxForMac/build/CMakeFiles/CMakeConfigureLog.yaml` 和 ninja 的第一条错误，
 不要一次改十个地方。
 
+### 4.1 已经撞过并修掉的（2026-11-20 实测，M2 / macOS 15.7.5）
+
+| 现象 | 原因 | 处理 |
+|---|---|---|
+| `go build` 卡在 `go: downloading ...` 几乎不动（约 50 KB/s） | 默认 `GOPROXY=https://proxy.golang.org` 在国内很慢 | `export GOPROXY=https://goproxy.cn,direct GOSUMDB=sum.golang.google.cn`；`build_macos.sh` 里不用改，脚本继承环境变量 |
+| 依赖编完，链接时刷几百条 `was built for newer 'macOS' version (15.0) than being linked (13.0)` | `build_deps_macos.sh` 没传部署目标，依赖按本机 15.x 编 | 已在脚本里加 `DEP_FLAGS`（arm64 + 13.0）；改完重跑 `build_deps_macos.sh` 会自动全量重编该依赖 |
+| `No such file or directory (os error 2)`，卡在"放入内核并部署 Qt 运行时" | bundle 里没有 `Contents/Resources`（CMake 只在有资源要装时才建），`cp rekobox.icns` 直接失败；BSD `cp` 的报错不带 `cp:` 前缀，容易误判成别的命令 | `build_macos.sh` 里 cp 图标前加 `mkdir -p "$APP/Contents/Resources"`（已修） |
+| 能启动，但 `codesign -dv` 的 `Identifier` 是 `RekoBox-55554944...` 这种自动 ID，`plutil -p Info.plist` 里 `CFBundleExecutable` / `CFBundleIdentifier` 全是空串 | Info.plist 里的 `@MACOSX_BUNDLE_*@` 隐式变量在 `qt_add_executable(MANUAL_FINALIZATION)` 这条路径上没有被定义 | 改成自己 `configure_file(... @ONLY)`：`CMakeLists.txt` 里设 `NKR_BUNDLE_*`，模板改用 `@NKR_BUNDLE_IDENTIFIER@` 等（已修） |
+
+### 4.2 可能还会撞上的
+
 | 现象 | 原因 | 处理 |
 |---|---|---|
 | `Unknown CMake command "protobuf_generate"` | 用了 brew 的新版 protobuf（没有该函数/签名变了） | 删掉 CMakeCache 重来，先跑 `build_deps_macos.sh`，确认 `CMAKE_PREFIX_PATH` 里有 `libs/deps/built` |
@@ -245,6 +292,11 @@ bash RekoboxForWindows/libs/build_macos.sh --dmg
 | 内核跑不起来 `killed: 9` | 二进制没签名 / 架构不对 | `file Content/MacOS/rekobox_core` 应为 `arm64`；`codesign -s -` 重签 |
 
 修完记得把结论补回这张表——下一个人（包括你）会再撞一次。
+
+> **验收时的坑：`screencapture` 截不到窗口。** macOS 15 上没给终端/编辑器"屏幕录制"
+> 权限时，截图里只有桌面壁纸和菜单栏，其他 App 的窗口会被剔除——看起来像"窗口没打开"，
+> 其实窗口是好的。要么去系统设置授权，要么用 Qt 自绘：临时在 `show()` 后面加
+> `QTimer::singleShot(3000, this, [this]{ grab().save("/tmp/ui.png"); });` 跑一次再删掉。
 
 ---
 
@@ -298,7 +350,7 @@ RekoboxForMac/                     ← 只放 mac 专属的东西，不放源码
 
 **P2（下一会话的主线）**
 
-- [ ] 把第一次编译跑通，更新 §4 表
+- [x] 把第一次编译跑通，更新 §4 表
 - [ ] 系统代理退出还原 + 服务清单落盘 + 崩溃自愈（`QvProxyConfigurator.cpp`）
 - [ ] TUN 实机验证：`utun` 建起来、路由生效、停掉能恢复
 - [ ] `genTunName()` 在 mac 上返回空（让 sing-box 自动挑 `utunN`），避免撞 Tailscale

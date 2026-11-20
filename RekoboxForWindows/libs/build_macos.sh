@@ -128,6 +128,9 @@ APP="$OUT/RekoBox.app"
 step "放入内核并部署 Qt 运行时"
 cp "$OUT/core/rekobox_core" "$APP/Contents/MacOS/rekobox_core"
 chmod +x "$APP/Contents/MacOS/rekobox_core"
+# CMake 只在有资源要装时才建 Resources；没有 NSMainNib 的 bundle 里它不存在，
+# 直接 cp 图标会得到 "No such file or directory (os error 2)"
+mkdir -p "$APP/Contents/Resources"
 if [ -f "$ROOT/res/rekobox.icns" ]; then
     cp "$ROOT/res/rekobox.icns" "$APP/Contents/Resources/rekobox.icns"
     echo "图标: $APP/Contents/Resources/rekobox.icns"

@@ -4,16 +4,18 @@
 
 ## 状态
 
-骨架已完成，**尚未在 Mac 上编译过**。接手请先看
+**已编译通过并启动**（2026-11-20，M2 / macOS 15.7.5 / Qt 6.7.2 / arm64），界面与效果图 A1 图一致。
+TUN 与系统代理尚未实机验证。接手请先看
 [`docs/HANDOFF.md`](docs/HANDOFF.md)，方案全文在 [`../docs/06-macos-port.md`](../docs/06-macos-port.md)。
 
 ## 怎么构建（在 M2 上）
 
 ```bash
-brew install cmake ninja go
+brew install cmake ninja go            # 或不用 sudo 把 cmake/ninja/go 解压到 ~/tools，见 HANDOFF §3 Step 0
 python3 -m aqt install-qt mac desktop 6.7.2 clang_64 -O ~/Qt \
         --archives qtbase qtsvg qttools
 
+export GOPROXY=https://goproxy.cn,direct   # 国内拉 Go 模块，否则内核那步会卡很久
 bash RekoboxForWindows/libs/build_deps_macos.sh   # zxing / yaml / protobuf（版本对齐 Windows）
 bash RekoboxForWindows/libs/get_source_local.sh   # 拉 sing-box 内核源码
 bash RekoboxForWindows/libs/build_macos.sh        # 编 .app

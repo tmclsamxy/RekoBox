@@ -1,0 +1,852 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>RekoBox for macOS · 界面效果图</title>
+<style>
+  :root{
+    --page:#f2f2f4;
+    --page-text:#1d1d1f;
+    --page-sub:#6e6e73;
+    --card:#ffffff;
+    --line:rgba(0,0,0,.10);
+    --accent:#0a7cff;
+
+    --win-bg:#ffffff;
+    --win-bg2:#f7f7f8;
+    --win-text:#1a1a1c;
+    --win-sub:#6b6b70;
+    --win-line:#e2e2e6;
+    --win-head:#fbfbfc;
+    --win-hover:#eef4ff;
+    --win-sel:#d7e7ff;
+    --win-input:#ffffff;
+    --title-1:#f6f6f7;
+    --title-2:#ebebee;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:var(--page);
+    color:var(--page-text);
+    font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei UI","Segoe UI",sans-serif;
+    -webkit-font-smoothing:antialiased;
+    padding:40px 32px 80px;
+  }
+  .wrap{max-width:1040px;margin:0 auto;}
+
+  header.page{margin-bottom:34px;}
+  header.page h1{font-size:26px;margin:0 0 8px;letter-spacing:.2px;}
+  header.page p{margin:0;color:var(--page-sub);font-size:14px;line-height:1.7;max-width:760px;}
+  header.page .tag{
+    display:inline-block;font-size:11px;letter-spacing:.6px;text-transform:uppercase;
+    color:#8a8a8f;border:1px solid var(--line);border-radius:999px;padding:3px 10px;margin-bottom:14px;
+  }
+
+  figure{margin:0 0 46px;}
+  figcaption{margin-top:14px;font-size:13px;color:var(--page-sub);line-height:1.7;}
+  figcaption b{color:var(--page-text);font-weight:600;}
+  .kicker{font-size:12px;color:#8a8a8f;margin-bottom:8px;letter-spacing:.4px;}
+
+  /* ---------- desktop / mac menu bar ---------- */
+  .desktop{
+    background:linear-gradient(160deg,#dfe6f3 0%,#e9e3f1 45%,#f3e7e4 100%);
+    border-radius:14px;padding:0 0 26px;overflow:hidden;
+    box-shadow:inset 0 0 0 1px rgba(0,0,0,.05);
+  }
+  .menubar{
+    height:26px;display:flex;align-items:center;gap:16px;padding:0 14px;
+    background:rgba(255,255,255,.62);backdrop-filter:blur(14px);
+    border-bottom:1px solid rgba(0,0,0,.06);
+    font-size:12px;color:#22222a;
+  }
+  .menubar .apple{font-size:14px;line-height:1;}
+  .menubar .bold{font-weight:600;}
+  .menubar .right{margin-left:auto;display:flex;align-items:center;gap:11px;color:#33333a;}
+  .menubar svg.mb{width:15px;height:15px;stroke:currentColor;fill:none;stroke-width:1.5;opacity:.85;display:block;}
+  .menubar svg.mb.fill{fill:currentColor;stroke:none;}
+  .menubar .tray-active{background:rgba(0,0,0,.10);border-radius:4px;padding:1px 4px;}
+
+  /* ---------- window ---------- */
+  .win{
+    width:964px;margin:26px auto 0;background:var(--win-bg);border-radius:10px;overflow:hidden;
+    box-shadow:0 24px 60px rgba(20,25,45,.26), 0 2px 6px rgba(20,25,45,.14);
+    border:1px solid rgba(0,0,0,.10);
+    color:var(--win-text);
+  }
+  .titlebar{
+    height:38px;display:flex;align-items:center;position:relative;
+    background:linear-gradient(var(--title-1),var(--title-2));
+    border-bottom:1px solid rgba(0,0,0,.10);
+  }
+  .lights{display:flex;gap:8px;padding-left:13px;}
+  .lights i{width:12px;height:12px;border-radius:50%;display:block;}
+  .lights .r{background:#ff5f57;box-shadow:inset 0 0 0 .5px rgba(0,0,0,.12);}
+  .lights .y{background:#febc2e;box-shadow:inset 0 0 0 .5px rgba(0,0,0,.12);}
+  .lights .g{background:#28c840;box-shadow:inset 0 0 0 .5px rgba(0,0,0,.12);}
+  .titlebar .title{
+    position:absolute;left:0;right:0;text-align:center;font-size:13px;font-weight:600;color:var(--win-text);
+    pointer-events:none;
+  }
+  .titlebar .title span{color:var(--win-sub);font-weight:400;}
+
+  /* ---------- A: windows-like layout ---------- */
+  .toolbar{
+    display:flex;align-items:center;gap:2px;padding:8px 12px;border-bottom:1px solid var(--win-line);
+    background:var(--win-bg);
+  }
+  .tbtn{
+    display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;
+    min-width:54px;padding:4px 8px 3px;border-radius:5px;color:var(--win-text);
+  }
+  .tbtn svg{width:21px;height:21px;stroke:currentColor;fill:none;stroke-width:1.6;}
+  .tbtn span{font-size:11px;color:var(--win-sub);}
+  .tbtn:hover{background:var(--win-hover);}
+  .tb-sep{width:1px;height:30px;background:var(--win-line);margin:0 8px;}
+  .spacer{flex:1;}
+  .chk{display:flex;align-items:center;gap:5px;font-size:12px;color:var(--win-text);margin-right:12px;white-space:nowrap;}
+  .box{width:13px;height:13px;border:1px solid #9a9aa1;border-radius:2px;background:var(--win-input);position:relative;}
+  .box.on{background:var(--accent);border-color:var(--accent);}
+  .box.on::after{content:"";position:absolute;left:3px;top:.5px;width:5px;height:8px;
+    border:solid #fff;border-width:0 1.6px 1.6px 0;transform:rotate(42deg);}
+  .search{
+    width:190px;height:26px;border:1px solid var(--win-line);border-radius:4px;background:var(--win-input);
+    display:flex;align-items:center;gap:6px;padding:0 8px;color:var(--win-sub);font-size:12px;
+  }
+  .search svg{width:13px;height:13px;stroke:currentColor;fill:none;stroke-width:1.7;opacity:.6;}
+  .btn{
+    height:26px;padding:0 12px;border:1px solid var(--win-line);border-radius:4px;background:linear-gradient(var(--win-bg),var(--win-bg2));
+    font-size:12px;color:var(--win-text);display:flex;align-items:center;gap:5px;
+  }
+  .tabs{
+    display:flex;align-items:flex-end;gap:1px;padding:0 8px;height:28px;background:var(--win-bg2);
+    border-bottom:1px solid var(--win-line);
+  }
+  .tab{
+    height:24px;padding:0 14px;font-size:12px;color:var(--win-sub);display:flex;align-items:center;
+    border:1px solid transparent;border-bottom:none;border-radius:3px 3px 0 0;
+  }
+  .tab.active{background:var(--win-bg);color:var(--win-text);border-color:var(--win-line);position:relative;top:1px;}
+  .tab .x{font-size:10px;opacity:.45;margin-left:6px;}
+
+  table{width:100%;border-collapse:collapse;table-layout:fixed;}
+  thead th{
+    height:28px;text-align:left;font-size:12px;font-weight:500;color:var(--win-sub);
+    background:var(--win-head);border-bottom:1px solid var(--win-line);border-right:1px solid var(--win-line);
+    padding:0 10px;
+  }
+  thead th:last-child{border-right:none;}
+  tbody td{
+    height:30px;font-size:12.5px;padding:0 10px;border-bottom:1px solid var(--win-line);
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  }
+  tbody tr:nth-child(even){background:var(--win-bg2);}
+  tbody tr.sel{background:var(--win-sel);}
+  .proto{
+    display:inline-block;font-size:10.5px;font-weight:600;letter-spacing:.3px;padding:1px 6px;border-radius:3px;
+    background:rgba(10,124,255,.10);color:#0a6ad6;border:1px solid rgba(10,124,255,.22);
+  }
+  .proto.ss{background:rgba(52,199,89,.12);color:#1f8a3e;border-color:rgba(52,199,89,.25);}
+  .proto.vmess{background:rgba(10,124,255,.11);color:#0a6ad6;border-color:rgba(10,124,255,.22);}
+  .proto.vless{background:rgba(142,84,233,.12);color:#6b3fc4;border-color:rgba(142,84,233,.25);}
+  .proto.trojan{background:rgba(255,149,0,.13);color:#a86200;border-color:rgba(255,149,0,.28);}
+  .proto.hy2{background:rgba(255,45,85,.11);color:#c11f3c;border-color:rgba(255,45,85,.24);}
+  .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:11.5px;color:var(--win-sub);}
+  .lat{display:inline-flex;align-items:center;gap:6px;}
+  .dot{width:6px;height:6px;border-radius:50%;display:inline-block;}
+  .g{background:#2fbf5a;} .y{background:#e0a020;} .o{background:#e07a20;} .r{background:#e0453a;} .n{background:#a0a0a6;}
+
+  .split{height:5px;background:var(--win-bg2);border-bottom:1px solid var(--win-line);border-top:1px solid var(--win-line);}
+  .lower{height:168px;display:flex;flex-direction:column;background:var(--win-bg);}
+  .log{padding:8px 12px;overflow:hidden;flex:1;}
+  .log div{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:11.5px;line-height:1.65;color:var(--win-sub);}
+  .log .t{color:#9a9aa1;}
+  .log .inf{color:#1f8a3e;}
+  .log .wrn{color:#a86800;}
+  .log .key{color:var(--win-text);}
+
+  .statusbar{
+    height:28px;display:flex;align-items:center;gap:14px;padding:0 12px;
+    border-top:1px solid var(--win-line);background:var(--win-bg2);font-size:12px;color:var(--win-sub);
+  }
+  .statusbar .live{display:flex;align-items:center;gap:7px;color:var(--win-text);}
+  .pulse{width:8px;height:8px;border-radius:50%;background:#2fbf5a;box-shadow:0 0 0 3px rgba(47,191,90,.18);}
+  .up{color:#c0392b;} .down{color:#1f7a3e;}
+
+  /* dark window */
+  .win.dark{
+    --win-bg:#1f2023; --win-bg2:#26272b; --win-text:#e9e9ec; --win-sub:#98989f; --win-line:#35363b;
+    --win-head:#2a2b30; --win-hover:#2f3a4d; --win-sel:#2b4a72; --win-input:#1a1b1e;
+    --title-1:#2b2c30; --title-2:#232427;
+    border-color:rgba(255,255,255,.10);
+  }
+  .win.dark tbody tr:nth-child(even){background:#242529;}
+  .win.dark .proto.ss{background:rgba(52,199,89,.16);color:#5fd97f;border-color:rgba(52,199,89,.3);}
+  .win.dark .proto.vmess{background:rgba(90,160,255,.16);color:#8fbcff;border-color:rgba(90,160,255,.3);}
+  .win.dark .proto.vless{background:rgba(160,120,255,.16);color:#bda4ff;border-color:rgba(160,120,255,.3);}
+  .win.dark .proto.trojan{background:rgba(255,170,60,.16);color:#ffc266;border-color:rgba(255,170,60,.3);}
+  .win.dark .proto.hy2{background:rgba(255,90,120,.16);color:#ff8fa3;border-color:rgba(255,90,120,.3);}
+  .win.dark .log .inf{color:#5fd97f;} .win.dark .log .wrn{color:#e6b45c;}
+  .win.dark .box{border-color:#6a6a72;}
+  .win.dark .up{color:#ff7a6b;} .win.dark .down{color:#6fd98a;}
+
+  /* ---------- B: mac native ---------- */
+  .shell{display:flex;height:596px;}
+  .side{
+    width:218px;flex:0 0 218px;padding:14px 12px 12px;display:flex;flex-direction:column;gap:4px;
+    background:rgba(246,246,248,.92);border-right:1px solid var(--win-line);
+  }
+  .win.dark .side{background:rgba(30,31,35,.95);}
+  .brand{display:flex;align-items:center;gap:9px;padding:2px 6px 12px;}
+  .brand .mark{width:26px;height:26px;border-radius:7px;background:linear-gradient(150deg,#2f7cf6,#7b5cf0);
+    display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:13px;}
+  .brand b{font-size:13px;font-weight:600;}
+  .brand em{font-style:normal;font-size:10.5px;color:var(--win-sub);display:block;margin-top:1px;}
+
+  .power{
+    border:1px solid var(--win-line);border-radius:9px;padding:11px 12px;background:var(--win-bg);
+    display:flex;align-items:center;gap:10px;margin-bottom:10px;
+  }
+  .power .txt{flex:1;min-width:0;}
+  .power .s1{font-size:12.5px;font-weight:600;}
+  .power .s2{font-size:11px;color:var(--win-sub);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .switch{width:34px;height:20px;border-radius:999px;background:#2fbf5a;position:relative;flex:0 0 auto;}
+  .switch::after{content:"";position:absolute;right:2px;top:2px;width:16px;height:16px;border-radius:50%;background:#fff;
+    box-shadow:0 1px 2px rgba(0,0,0,.25);}
+  .switch.off{background:#c9c9cf;}
+  .switch.off::after{left:2px;right:auto;}
+
+  .nav{display:flex;flex-direction:column;gap:2px;}
+  .nav a{
+    display:flex;align-items:center;gap:9px;height:32px;padding:0 9px;border-radius:7px;
+    font-size:12.5px;color:var(--win-text);text-decoration:none;
+  }
+  .nav a svg{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.7;opacity:.75;}
+  .nav a.active{background:var(--win-sel);font-weight:600;}
+  .nav a .badge{margin-left:auto;font-size:10.5px;color:var(--win-sub);}
+  .side .foot{margin-top:auto;border-top:1px solid var(--win-line);padding-top:9px;display:flex;flex-direction:column;gap:3px;}
+  .side .foot .row{display:flex;align-items:center;justify-content:space-between;font-size:11.5px;color:var(--win-sub);height:28px;padding:0 6px;}
+  .side .foot .row b{color:var(--win-text);font-weight:600;}
+
+  .main{flex:1;display:flex;flex-direction:column;background:var(--win-bg);min-width:0;}
+  .mhead{display:flex;align-items:center;gap:12px;padding:16px 22px 12px;}
+  .mhead h2{font-size:17px;margin:0;font-weight:600;}
+  .mhead .sub{font-size:11.5px;color:var(--win-sub);margin-left:2px;}
+  .mhead .grow{flex:1;}
+  .pill{
+    height:26px;border-radius:7px;border:1px solid var(--win-line);background:var(--win-bg2);
+    display:flex;align-items:center;gap:6px;padding:0 10px;font-size:11.5px;color:var(--win-sub);
+  }
+  .pill.primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600;}
+  .cards{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;padding:0 22px 6px;}
+  .card{border:1px solid var(--win-line);border-radius:10px;padding:11px 13px;background:var(--win-bg2);}
+  .card .k{font-size:10.5px;color:var(--win-sub);}
+  .card .v{font-size:16px;font-weight:600;margin-top:3px;letter-spacing:.2px;}
+  .card .v small{font-size:11px;font-weight:400;color:var(--win-sub);margin-left:3px;}
+
+  .nlist{padding:8px 14px 0;flex:1;overflow:hidden;}
+  .nrow{
+    display:flex;align-items:center;gap:12px;height:46px;padding:0 10px;border-radius:8px;
+  }
+  .nrow:nth-child(odd){background:transparent;}
+  .nrow.on{background:var(--win-sel);}
+  .nrow .flag{
+    width:26px;height:26px;border-radius:50%;background:var(--win-bg2);border:1px solid var(--win-line);
+    display:flex;align-items:center;justify-content:center;font-size:10.5px;font-weight:700;color:var(--win-sub);
+  }
+  .nrow .nm{font-size:12.5px;font-weight:600;min-width:0;}
+  .nrow .addr{font-size:11px;color:var(--win-sub);font-family:ui-monospace,Menlo,Consolas,monospace;margin-top:2px;}
+  .nrow .grow{flex:1;min-width:0;}
+  .chip{font-size:11px;padding:2px 8px;border-radius:999px;border:1px solid var(--win-line);color:var(--win-sub);}
+  .chip.ok{color:#1f8a3e;border-color:rgba(52,199,89,.35);background:rgba(52,199,89,.10);}
+  .chip.mid{color:#a86200;border-color:rgba(255,149,0,.35);background:rgba(255,149,0,.12);}
+  .chip.bad{color:#c11f3c;border-color:rgba(255,45,85,.3);background:rgba(255,45,85,.10);}
+  .bar{width:28px;height:4px;border-radius:2px;background:var(--win-line);overflow:hidden;}
+  .bar i{display:block;height:4px;background:#2fbf5a;}
+
+  /* ---------- B2 popover ---------- */
+  .pop-scene{position:relative;height:404px;border-radius:14px;overflow:hidden;
+    background:linear-gradient(150deg,#cfd9ea 0%,#e3d8ee 50%,#f0e2dc 100%);}
+  .ghost{
+    position:absolute;left:58px;top:96px;width:520px;height:286px;border-radius:10px;
+    background:rgba(255,255,255,.55);border:1px solid rgba(255,255,255,.75);
+    box-shadow:0 18px 44px rgba(20,25,45,.10);filter:blur(.6px);
+  }
+  .ghost .gbar{height:26px;border-radius:10px 10px 0 0;background:rgba(255,255,255,.55);
+    border-bottom:1px solid rgba(0,0,0,.05);display:flex;align-items:center;gap:6px;padding-left:10px;}
+  .ghost .gbar i{width:8px;height:8px;border-radius:50%;background:rgba(0,0,0,.12);}
+  .ghost .grow{display:flex;gap:10px;padding:12px;}
+  .ghost .gcol{flex:1;display:flex;flex-direction:column;gap:9px;}
+  .ghost .gline{height:9px;border-radius:4px;background:rgba(0,0,0,.07);}
+  .ghost .gline.s{width:62%;}
+  .pop{
+    position:absolute;top:66px;right:52px;width:308px;border-radius:12px;
+    background:rgba(252,252,253,.97);border:1px solid rgba(0,0,0,.10);
+    box-shadow:0 20px 50px rgba(20,25,45,.28);
+  }
+  .pop::before{
+    content:"";position:absolute;top:-6px;right:30px;width:11px;height:11px;
+    background:rgba(252,252,253,.97);transform:rotate(45deg);
+    border-left:1px solid rgba(0,0,0,.10);border-top:1px solid rgba(0,0,0,.10);
+  }
+  .pop .hdr{padding:14px 15px 10px;display:flex;align-items:center;gap:10px;border-radius:12px 12px 0 0;}
+  .pop .hdr .t{flex:1;}
+  .pop .hdr .t b{font-size:13px;}
+  .pop .hdr .t span{display:block;font-size:10.5px;color:#6e6e73;margin-top:2px;}
+  .pop .stat{display:grid;grid-template-columns:1fr 1fr 1fr;border-top:1px solid rgba(0,0,0,.07);
+    border-bottom:1px solid rgba(0,0,0,.07);}
+  .pop .stat div{padding:9px 12px;font-size:11px;color:#6e6e73;}
+  .pop .stat b{display:block;font-size:12.5px;color:#1a1a1c;margin-top:2px;}
+  .pop .list{padding:6px;}
+  .pop .li{display:flex;align-items:center;gap:8px;height:30px;padding:0 9px;border-radius:6px;font-size:12px;color:#1a1a1c;}
+  .pop .li.on{background:#d7e7ff;}
+  .pop .li .lat{margin-left:auto;font-size:10.5px;color:#6e6e73;}
+  .pop .acts{display:flex;gap:6px;padding:8px 10px;border-top:1px solid rgba(0,0,0,.07);border-radius:0 0 12px 12px;}
+  .pop .acts .a{flex:1;height:26px;border-radius:6px;background:#f2f2f5;display:flex;align-items:center;
+    justify-content:center;font-size:11.5px;color:#1a1a1c;}
+
+  /* ---------- C: preferences ---------- */
+  .prefs{width:640px;}
+  .pref-tabs{display:flex;gap:2px;padding:0 14px;background:var(--title-2);border-bottom:1px solid rgba(0,0,0,.10);}
+  .pref-tabs .pt{height:34px;padding:0 14px;display:flex;align-items:center;font-size:12.5px;color:var(--win-sub);}
+  .pref-tabs .pt.active{background:var(--win-bg);color:var(--win-text);border-radius:6px 6px 0 0;font-weight:600;}
+  .pref-body{padding:18px 22px 8px;display:flex;flex-direction:column;gap:2px;}
+  .frow{display:flex;align-items:center;gap:14px;min-height:38px;}
+  .frow label{width:150px;text-align:right;font-size:12.5px;color:var(--win-sub);}
+  .frow .ctl{flex:1;display:flex;align-items:center;gap:8px;}
+  .input{height:26px;border:1px solid var(--win-line);border-radius:5px;background:var(--win-input);
+    display:flex;align-items:center;padding:0 9px;font-size:12px;min-width:150px;justify-content:space-between;color:var(--win-text);}
+  .input .caret{color:var(--win-sub);font-size:9px;}
+  .hint{font-size:11px;color:var(--win-sub);}
+  .pref-foot{display:flex;justify-content:flex-end;gap:8px;padding:12px 18px;border-top:1px solid var(--win-line);background:var(--win-bg2);}
+  .pref-foot .b{height:26px;padding:0 16px;border-radius:5px;font-size:12px;display:flex;align-items:center;border:1px solid var(--win-line);background:var(--win-bg);}
+  .pref-foot .b.pri{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600;}
+
+  .notes{margin-top:12px;padding:14px 16px;background:#fff;border:1px solid var(--line);border-radius:10px;
+    font-size:12.5px;color:var(--page-sub);line-height:1.9;}
+  .notes b{color:var(--page-text);}
+  .notes ol{margin:6px 0 0;padding-left:20px;}
+  .notes li{margin:2px 0;}
+  .legend{display:flex;gap:18px;flex-wrap:wrap;margin-top:10px;font-size:12px;color:var(--page-sub);}
+  .legend i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:6px;}
+
+  @media (max-width:1020px){
+    body{padding:24px 12px 60px;}
+    .win,.prefs{width:100%;}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="page">
+  <div class="tag">RekoBox · macOS / Apple Silicon</div>
+  <h1>界面效果图 · 与 Windows 同构</h1>
+  <p>
+    同一套 Qt 6.7 Widgets 代码（<code>mainwindow.ui</code> + <code>neko.css</code>）在 macOS 上编译，
+    界面内容与排版完全一致；系统只接管了四处：屏幕顶部菜单栏、窗口红绿灯、菜单栏状态项、系统字体。
+    A 组是"和 Windows 一样"，B 组是加一层 Mac 外壳的可选方案，C 组为首选项窗口。
+  </p>
+</header>
+
+<!-- ============ A1 ============ -->
+<figure>
+  <div class="kicker">A1 · 直译版（浅色）— Phase 1 即可交付</div>
+  <div class="desktop">
+    <div class="menubar">
+      <span class="apple"></span>
+      <span class="bold">RekoBox</span>
+      <span>文件</span><span>编辑</span><span>程序</span><span>服务器</span><span>窗口</span><span>帮助</span>
+      <span class="right">
+        <svg class="mb" viewBox="0 0 24 24"><path d="M3.5 9.2a13 13 0 0117 0"/><path d="M6.6 12.6a8.5 8.5 0 0110.8 0"/><path d="M9.6 16a4 4 0 014.8 0"/><circle cx="12" cy="19" r="1.1" fill="currentColor" stroke="none"/></svg>
+        <svg class="mb" viewBox="0 0 24 24"><rect x="2" y="8" width="17" height="8" rx="2.2"/><rect x="4" y="10" width="11" height="4" rx="1" fill="currentColor" stroke="none"/><path d="M21 11v2"/></svg>
+        <span>19:42</span>
+      </span>
+    </div>
+
+    <div class="win">
+      <div class="titlebar">
+        <div class="lights"><i class="r"></i><i class="y"></i><i class="g"></i></div>
+        <div class="title">RekoBox <span>— 节点</span></div>
+      </div>
+
+      <div class="toolbar">
+        <div class="tbtn">
+          <svg viewBox="0 0 24 24"><path d="M6 4l13 8-13 8z"/></svg><span>程序</span>
+        </div>
+        <div class="tbtn">
+          <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.8v2.4M12 18.8v2.4M4.4 12H2M22 12h-2.4M6.6 6.6L4.9 4.9M19.1 19.1l-1.7-1.7M17.4 6.6l1.7-1.7M4.9 19.1l1.7-1.7"/></svg><span>首选项</span>
+        </div>
+        <div class="tbtn">
+          <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="5" rx="1.4"/><rect x="3" y="15" width="18" height="5" rx="1.4"/><path d="M7 6.5h.01M7 17.5h.01"/></svg><span>服务器</span>
+        </div>
+        <div class="tbtn">
+          <svg viewBox="0 0 24 24"><path d="M12 3v11m0 0l-4-4m4 4l4-4"/><path d="M4 17v2.5a1.5 1.5 0 001.5 1.5h13A1.5 1.5 0 0020 19.5V17"/></svg><span>更新</span>
+        </div>
+        <div class="tb-sep"></div>
+        <label class="chk"><span class="box"></span>VPN 模式</label>
+        <label class="chk"><span class="box on"></span>系统代理</label>
+        <div class="spacer"></div>
+        <div class="search">
+          <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4 4"/></svg>
+          搜索名称或地址
+        </div>
+        <div class="btn" style="margin-left:8px;">
+          <svg viewBox="0 0 24 24" style="width:13px;height:13px;stroke:currentColor;fill:none;stroke-width:1.7"><path d="M3 12h4l3 7 4-14 3 7h4"/></svg>
+          URL 测试
+        </div>
+      </div>
+
+      <div class="tabs">
+        <div class="tab active">默认<span class="x">×</span></div>
+        <div class="tab">机场订阅<span class="x">×</span></div>
+        <div class="tab">手动<span class="x">×</span></div>
+        <div class="tab" style="padding:0 8px;">+</div>
+      </div>
+
+      <table>
+        <colgroup>
+          <col style="width:96px"><col style="width:216px"><col><col style="width:118px"><col style="width:126px">
+        </colgroup>
+        <thead>
+          <tr><th>类型</th><th>地址</th><th>名称</th><th>测试结果</th><th>流量</th></tr>
+        </thead>
+        <tbody>
+          <tr class="sel">
+            <td><span class="proto ss">SS</span></td>
+            <td class="mono">hk1.example.net:443</td>
+            <td>香港 01 · IEPL</td>
+            <td><span class="lat"><i class="dot g"></i>42 ms</span></td>
+            <td class="mono">128 MB</td>
+          </tr>
+          <tr>
+            <td><span class="proto vmess">VMess</span></td>
+            <td class="mono">jp2.example.net:8443</td>
+            <td>日本 02 · BGP</td>
+            <td><span class="lat"><i class="dot g"></i>78 ms</span></td>
+            <td class="mono">64.2 MB</td>
+          </tr>
+          <tr>
+            <td><span class="proto vless">VLESS</span></td>
+            <td class="mono">sg3.example.net:443</td>
+            <td>新加坡 03 · Vision</td>
+            <td><span class="lat"><i class="dot y"></i>121 ms</span></td>
+            <td class="mono">210 MB</td>
+          </tr>
+          <tr>
+            <td><span class="proto trojan">Trojan</span></td>
+            <td class="mono">us4.example.net:443</td>
+            <td>美国 04 · CN2 GIA</td>
+            <td><span class="lat"><i class="dot o"></i>186 ms</span></td>
+            <td class="mono">—</td>
+          </tr>
+          <tr>
+            <td><span class="proto hy2">HY2</span></td>
+            <td class="mono">tw5.example.net:8443</td>
+            <td>台湾 05 · Hysteria2</td>
+            <td><span class="lat"><i class="dot n"></i>超时</span></td>
+            <td class="mono">12.4 MB</td>
+          </tr>
+          <tr>
+            <td><span class="proto ss">SS</span></td>
+            <td class="mono">kr6.example.net:8388</td>
+            <td>韩国 06 · 中转</td>
+            <td><span class="lat"><i class="dot g"></i>96 ms</span></td>
+            <td class="mono">1.2 GB</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="split"></div>
+
+      <div class="lower">
+        <div class="tabs" style="height:26px;">
+          <div class="tab active" style="height:22px;">日志</div>
+          <div class="tab" style="height:22px;">连接</div>
+        </div>
+        <div class="log">
+          <div><span class="t">19:42:08</span> <span class="inf">[INF]</span> <span class="key">inbound/mixed[0]</span>: listening at 127.0.0.1:2080</div>
+          <div><span class="t">19:42:08</span> <span class="inf">[INF]</span> <span class="key">inbound/tun[0]</span>: started at utun9, stack=mixed</div>
+          <div><span class="t">19:42:09</span> <span class="inf">[INF]</span> outbound/ss[香港 01]: outbound connection to cdn.example.com:443</div>
+          <div><span class="t">19:42:12</span> <span class="wrn">[WRN]</span> dns: lookup failed for example.org, fallback to remote</div>
+          <div><span class="t">19:42:12</span> <span class="inf">[INF]</span> router: match[3] domain_suffix=.org → proxy</div>
+        </div>
+      </div>
+
+      <div class="statusbar">
+        <span class="live"><i class="pulse"></i>运行中 00:12:31</span>
+        <span style="flex:1"></span>
+        <span>mixed 2080 · socks 2081</span>
+        <span><span class="up">↑ 128 KB/s</span> &nbsp; <span class="down">↓ 2.4 MB/s</span></span>
+      </div>
+    </div>
+  </div>
+
+  <figcaption>
+    <b>与 Windows 逐项一致</b>：工具栏四个下拉按钮、VPN/系统代理勾选、搜索框、URL 测试；
+    分组标签（默认 / 机场订阅 / 手动）；五列表格与交替行色；日志/连接下方面板；状态栏运行时长与实时速率。
+  </figcaption>
+  <div class="notes">
+    <b>只有这 4 处不同（系统强制）</b>
+    <ol>
+      <li>菜单栏在屏幕顶部（这里画在最上方），窗口内不再有菜单栏 — Qt 自动处理，代码零改动</li>
+      <li>左上角红黄绿按钮替代 Windows 的最小化/最大化/关闭，绿色是全屏</li>
+      <li>字体为 PingFang SC，字号 13px 起步；Windows 是微软雅黑 9pt，需在 QSS 里指定字体栈</li>
+      <li>托盘入口在右上角菜单栏，不再在任务栏右下角（见 B2）</li>
+    </ol>
+  </div>
+</figure>
+
+<!-- ============ A2 ============ -->
+<figure>
+  <div class="kicker">A2 · 直译版（深色）— 跟随系统外观</div>
+  <div class="desktop" style="background:linear-gradient(160deg,#2a2f3d 0%,#332c3f 50%,#3a3138 100%);">
+    <div class="menubar" style="background:rgba(40,40,46,.72);color:#e8e8ec;border-bottom-color:rgba(255,255,255,.08);">
+      <span class="apple"></span>
+      <span class="bold">RekoBox</span>
+      <span>文件</span><span>编辑</span><span>程序</span><span>服务器</span><span>窗口</span><span>帮助</span>
+      <span class="right" style="color:#d8d8de;">
+        <svg class="mb" viewBox="0 0 24 24"><path d="M3.5 9.2a13 13 0 0117 0"/><path d="M6.6 12.6a8.5 8.5 0 0110.8 0"/><path d="M9.6 16a4 4 0 014.8 0"/><circle cx="12" cy="19" r="1.1" fill="currentColor" stroke="none"/></svg>
+        <svg class="mb" viewBox="0 0 24 24"><rect x="2" y="8" width="17" height="8" rx="2.2"/><rect x="4" y="10" width="11" height="4" rx="1" fill="currentColor" stroke="none"/><path d="M21 11v2"/></svg>
+        <span>23:07</span>
+      </span>
+    </div>
+
+    <div class="win dark">
+      <div class="titlebar">
+        <div class="lights"><i class="r"></i><i class="y"></i><i class="g"></i></div>
+        <div class="title">RekoBox <span>— 节点</span></div>
+      </div>
+
+      <div class="toolbar">
+        <div class="tbtn"><svg viewBox="0 0 24 24"><path d="M6 4l13 8-13 8z"/></svg><span>程序</span></div>
+        <div class="tbtn"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.8v2.4M12 18.8v2.4M4.4 12H2M22 12h-2.4M6.6 6.6L4.9 4.9M19.1 19.1l-1.7-1.7M17.4 6.6l1.7-1.7M4.9 19.1l1.7-1.7"/></svg><span>首选项</span></div>
+        <div class="tbtn"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="5" rx="1.4"/><rect x="3" y="15" width="18" height="5" rx="1.4"/><path d="M7 6.5h.01M7 17.5h.01"/></svg><span>服务器</span></div>
+        <div class="tbtn"><svg viewBox="0 0 24 24"><path d="M12 3v11m0 0l-4-4m4 4l4-4"/><path d="M4 17v2.5a1.5 1.5 0 001.5 1.5h13A1.5 1.5 0 0020 19.5V17"/></svg><span>更新</span></div>
+        <div class="tb-sep"></div>
+        <label class="chk"><span class="box on"></span>VPN 模式</label>
+        <label class="chk"><span class="box"></span>系统代理</label>
+        <div class="spacer"></div>
+        <div class="search"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4 4"/></svg>搜索名称或地址</div>
+        <div class="btn" style="margin-left:8px;">URL 测试</div>
+      </div>
+
+      <div class="tabs">
+        <div class="tab active">默认<span class="x">×</span></div>
+        <div class="tab">机场订阅<span class="x">×</span></div>
+        <div class="tab">手动<span class="x">×</span></div>
+      </div>
+
+      <table>
+        <colgroup><col style="width:96px"><col style="width:216px"><col><col style="width:118px"><col style="width:126px"></colgroup>
+        <thead><tr><th>类型</th><th>地址</th><th>名称</th><th>测试结果</th><th>流量</th></tr></thead>
+        <tbody>
+          <tr class="sel"><td><span class="proto ss">SS</span></td><td class="mono">hk1.example.net:443</td><td>香港 01 · IEPL</td><td><span class="lat"><i class="dot g"></i>42 ms</span></td><td class="mono">128 MB</td></tr>
+          <tr><td><span class="proto vmess">VMess</span></td><td class="mono">jp2.example.net:8443</td><td>日本 02 · BGP</td><td><span class="lat"><i class="dot g"></i>78 ms</span></td><td class="mono">64.2 MB</td></tr>
+          <tr><td><span class="proto vless">VLESS</span></td><td class="mono">sg3.example.net:443</td><td>新加坡 03 · Vision</td><td><span class="lat"><i class="dot y"></i>121 ms</span></td><td class="mono">210 MB</td></tr>
+          <tr><td><span class="proto trojan">Trojan</span></td><td class="mono">us4.example.net:443</td><td>美国 04 · CN2 GIA</td><td><span class="lat"><i class="dot o"></i>186 ms</span></td><td class="mono">—</td></tr>
+          <tr><td><span class="proto hy2">HY2</span></td><td class="mono">tw5.example.net:8443</td><td>台湾 05 · Hysteria2</td><td><span class="lat"><i class="dot n"></i>超时</span></td><td class="mono">12.4 MB</td></tr>
+          <tr><td><span class="proto ss">SS</span></td><td class="mono">kr6.example.net:8388</td><td>韩国 06 · 中转</td><td><span class="lat"><i class="dot g"></i>96 ms</span></td><td class="mono">1.2 GB</td></tr>
+        </tbody>
+      </table>
+
+      <div class="split"></div>
+      <div class="lower">
+        <div class="tabs" style="height:26px;">
+          <div class="tab active" style="height:22px;">日志</div>
+          <div class="tab" style="height:22px;">连接</div>
+        </div>
+        <div class="log">
+          <div><span class="t">23:06:52</span> <span class="inf">[INF]</span> <span class="key">inbound/tun[0]</span>: started at utun9, auto_route=true</div>
+          <div><span class="t">23:06:53</span> <span class="inf">[INF]</span> outbound/ss[香港 01]: outbound connection to api.github.com:443</div>
+          <div><span class="t">23:06:57</span> <span class="wrn">[WRN]</span> connection: open connection to 1.1.1.1:853 failed: timeout</div>
+          <div><span class="t">23:06:57</span> <span class="inf">[INF]</span> router: match[7] ip_cidr=1.1.1.1/32 → proxy</div>
+          <div><span class="t">23:07:01</span> <span class="inf">[INF]</span> <span class="key">inbound/mixed[0]</span>: inbound connection from 127.0.0.1:53842</div>
+          <div><span class="t">23:07:01</span> <span class="inf">[INF]</span> outbound/ss[香港 01]: outbound connection to www.apple.com:443</div>
+        </div>
+      </div>
+
+      <div class="statusbar">
+        <span class="live"><i class="pulse"></i>运行中 00:00:42</span>
+        <span style="flex:1"></span>
+        <span>tun utun9 · mixed 2080</span>
+        <span><span class="up">↑ 36 KB/s</span> &nbsp; <span class="down">↓ 812 KB/s</span></span>
+      </div>
+    </div>
+  </div>
+  <figcaption>
+    <b>深色模式</b>：Qt 6 会自动把 <code>Qt::ColorScheme</code> 传给应用，但现有 4 套 QSS 都是浅色，
+    需要补一套深色变量（见方案 §9.3）。除配色外，布局与浅色完全一致。
+  </figcaption>
+</figure>
+
+<!-- ============ B1 ============ -->
+<figure>
+  <div class="kicker">B1 · Mac 化外壳（可选 Phase 5）— 业务代码不动，只换主窗口布局</div>
+  <div class="desktop">
+    <div class="menubar">
+      <span class="apple"></span>
+      <span class="bold">RekoBox</span>
+      <span>文件</span><span>编辑</span><span>节点</span><span>窗口</span><span>帮助</span>
+      <span class="right">
+        <svg class="mb" viewBox="0 0 24 24"><path d="M3.5 9.2a13 13 0 0117 0"/><path d="M6.6 12.6a8.5 8.5 0 0110.8 0"/><path d="M9.6 16a4 4 0 014.8 0"/><circle cx="12" cy="19" r="1.1" fill="currentColor" stroke="none"/></svg>
+        <svg class="mb" viewBox="0 0 24 24"><rect x="2" y="8" width="17" height="8" rx="2.2"/><rect x="4" y="10" width="11" height="4" rx="1" fill="currentColor" stroke="none"/><path d="M21 11v2"/></svg>
+        <span>19:42</span>
+      </span>
+    </div>
+
+    <div class="win">
+      <div class="titlebar">
+        <div class="lights"><i class="r"></i><i class="y"></i><i class="g"></i></div>
+        <div class="title">RekoBox</div>
+      </div>
+
+      <div class="shell">
+        <div class="side">
+          <div class="brand">
+            <div class="mark">R</div>
+            <div><b>RekoBox</b><em>1.0.0 · arm64</em></div>
+          </div>
+
+          <div class="power">
+            <div class="txt">
+              <div class="s1">已连接</div>
+              <div class="s2">香港 01 · IEPL</div>
+            </div>
+            <div class="switch"></div>
+          </div>
+
+          <nav class="nav">
+            <a class="active">
+              <svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/></svg>节点<span class="badge">34</span>
+            </a>
+            <a><svg viewBox="0 0 24 24"><path d="M4 7h16v12H4z"/><path d="M4 7l8-3 8 3"/></svg>订阅<span class="badge">2</span></a>
+            <a><svg viewBox="0 0 24 24"><circle cx="6" cy="6" r="2"/><circle cx="18" cy="18" r="2"/><path d="M8 6h6a4 4 0 010 8H10a4 4 0 000 8h6"/></svg>路由</a>
+            <a><svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 0116 0"/><path d="M7 15a5 5 0 0110 0"/><circle cx="12" cy="19" r="1.4"/></svg>连接</a>
+            <a><svg viewBox="0 0 24 24"><path d="M5 5h14v14H5z"/><path d="M8 9h8M8 13h8M8 17h4"/></svg>日志</a>
+            <a><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6l1.4 1.4M17 17l1.4 1.4M18.4 5.6L17 7M7 17l-1.4 1.4"/></svg>设置</a>
+          </nav>
+
+          <div class="foot">
+            <div class="row"><span>系统代理</span><b style="color:#1f8a3e;">已开启</b></div>
+            <div class="row"><span>运行时长</span><b>00:12:31</b></div>
+          </div>
+        </div>
+
+        <div class="main">
+          <div class="mhead">
+            <h2>节点</h2>
+            <span class="sub">默认分组 · 34 个</span>
+            <span class="grow"></span>
+            <span class="pill">
+              <svg viewBox="0 0 24 24" style="width:12px;height:12px;stroke:currentColor;fill:none;stroke-width:2"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4 4"/></svg>
+              搜索
+            </span>
+            <span class="pill primary">全部测试</span>
+          </div>
+
+          <div class="cards">
+            <div class="card"><div class="k">当前延迟</div><div class="v">42 <small>ms</small></div></div>
+            <div class="card"><div class="k">实时速率</div><div class="v">2.4 <small>MB/s ↓</small></div></div>
+            <div class="card"><div class="k">本次用量</div><div class="v">1.83 <small>GB</small></div></div>
+          </div>
+
+          <div class="nlist">
+            <div class="nrow on">
+              <div class="flag">HK</div>
+              <div class="grow"><div class="nm">香港 01 · IEPL</div><div class="addr">hk1.example.net:443 · SS</div></div>
+              <div class="bar"><i style="width:82%"></i></div>
+              <span class="chip ok">42 ms</span>
+            </div>
+            <div class="nrow">
+              <div class="flag">JP</div>
+              <div class="grow"><div class="nm">日本 02 · BGP</div><div class="addr">jp2.example.net:8443 · VMess</div></div>
+              <div class="bar"><i style="width:64%"></i></div>
+              <span class="chip ok">78 ms</span>
+            </div>
+            <div class="nrow">
+              <div class="flag">SG</div>
+              <div class="grow"><div class="nm">新加坡 03 · Vision</div><div class="addr">sg3.example.net:443 · VLESS</div></div>
+              <div class="bar"><i style="width:46%"></i></div>
+              <span class="chip mid">121 ms</span>
+            </div>
+            <div class="nrow">
+              <div class="flag">US</div>
+              <div class="grow"><div class="nm">美国 04 · CN2 GIA</div><div class="addr">us4.example.net:443 · Trojan</div></div>
+              <div class="bar"><i style="width:28%"></i></div>
+              <span class="chip mid">186 ms</span>
+            </div>
+            <div class="nrow">
+              <div class="flag">TW</div>
+              <div class="grow"><div class="nm">台湾 05 · Hysteria2</div><div class="addr">tw5.example.net:8443 · HY2</div></div>
+              <div class="bar"><i style="width:6%"></i></div>
+              <span class="chip bad">超时</span>
+            </div>
+            <div class="nrow">
+              <div class="flag">KR</div>
+              <div class="grow"><div class="nm">韩国 06 · 中转</div><div class="addr">kr6.example.net:8388 · SS</div></div>
+              <div class="bar"><i style="width:72%"></i></div>
+              <span class="chip ok">96 ms</span>
+            </div>
+            <div class="nrow">
+              <div class="flag">HK</div>
+              <div class="grow"><div class="nm">香港 07 · IPLC</div><div class="addr">hk7.example.net:443 · VLESS</div></div>
+              <div class="bar"><i style="width:78%"></i></div>
+              <span class="chip ok">54 ms</span>
+            </div>
+            <div class="nrow">
+              <div class="flag">JP</div>
+              <div class="grow"><div class="nm">日本 08 · 软银</div><div class="addr">jp8.example.net:8443 · Trojan</div></div>
+              <div class="bar"><i style="width:58%"></i></div>
+              <span class="chip ok">88 ms</span>
+            </div>
+            <div class="nrow" style="color:var(--win-sub);justify-content:center;font-size:11.5px;height:38px;">
+              共 34 个节点 · 右键可排序 / 测速 / 删除
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <figcaption>
+    <b>只是换壳</b>：左侧六个入口对应现有页面（节点表、订阅、路由、连接、日志、设置），
+    顶部三张卡片把状态栏的"运行时长 / 速率 / 用量"提到了显眼位置。表格换成行卡片，排序、右键菜单、
+    多选、快捷键全部沿用原逻辑。
+  </figcaption>
+</figure>
+
+<!-- ============ B2 ============ -->
+<figure>
+  <div class="kicker">B2 · 菜单栏弹出面板 — 不打开主窗口也能切节点</div>
+  <div class="pop-scene">
+    <div class="menubar" style="position:absolute;top:0;left:0;right:0;">
+      <span class="apple"></span><span class="bold">Finder</span><span>文件</span><span>编辑</span><span>显示</span>
+      <span class="right">
+        <svg class="mb" viewBox="0 0 24 24"><path d="M3.5 9.2a13 13 0 0117 0"/><path d="M6.6 12.6a8.5 8.5 0 0110.8 0"/><path d="M9.6 16a4 4 0 014.8 0"/><circle cx="12" cy="19" r="1.1" fill="currentColor" stroke="none"/></svg>
+        <svg class="mb" viewBox="0 0 24 24"><rect x="2" y="8" width="17" height="8" rx="2.2"/><rect x="4" y="10" width="11" height="4" rx="1" fill="currentColor" stroke="none"/><path d="M21 11v2"/></svg>
+        <span class="tray-active" style="display:flex;align-items:center;">
+          <svg class="mb" viewBox="0 0 24 24" style="width:16px;height:16px;"><rect x="4" y="4" width="16" height="16" rx="5"/><circle cx="12" cy="12" r="2.6" fill="currentColor" stroke="none"/></svg>
+        </span>
+        <span>19:42</span>
+      </span>
+    </div>
+
+    <div class="ghost">
+      <div class="gbar"><i></i><i></i><i></i></div>
+      <div class="grow">
+        <div class="gcol">
+          <div class="gline" style="width:88%"></div>
+          <div class="gline s"></div>
+          <div class="gline" style="width:74%"></div>
+          <div class="gline s"></div>
+          <div class="gline" style="width:80%"></div>
+        </div>
+        <div class="gcol">
+          <div class="gline s"></div>
+          <div class="gline" style="width:82%"></div>
+          <div class="gline s"></div>
+          <div class="gline" style="width:70%"></div>
+          <div class="gline" style="width:86%"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="pop">
+      <div class="hdr">
+        <div class="mark" style="width:24px;height:24px;border-radius:6px;background:linear-gradient(150deg,#2f7cf6,#7b5cf0);
+          display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:12px;">R</div>
+        <div class="t"><b>已连接</b><span>香港 01 · IEPL · 00:12:31</span></div>
+        <div class="switch"></div>
+      </div>
+      <div class="stat">
+        <div>下行<b>2.4 MB/s</b></div>
+        <div>上行<b>128 KB/s</b></div>
+        <div>延迟<b>42 ms</b></div>
+      </div>
+      <div class="list">
+        <div class="li on"><span class="dot g"></span>香港 01 · IEPL<span class="lat">42 ms</span></div>
+        <div class="li"><span class="dot g"></span>日本 02 · BGP<span class="lat">78 ms</span></div>
+        <div class="li"><span class="dot y"></span>新加坡 03 · Vision<span class="lat">121 ms</span></div>
+        <div class="li"><span class="dot n"></span>台湾 05 · Hysteria2<span class="lat">超时</span></div>
+      </div>
+      <div class="acts">
+        <div class="a">显示主窗口</div>
+        <div class="a">系统代理</div>
+        <div class="a">退出</div>
+      </div>
+    </div>
+  </div>
+  <figcaption>
+    <b>对应 Windows 的托盘菜单</b>：Windows 上是任务栏右下角一个图标，macOS 上是菜单栏右上角一个单色模板图标。
+    这部分用 <code>QSystemTrayIcon</code> + 自绘 <code>QWidget</code> 弹出面板实现，约 150 行。
+  </figcaption>
+</figure>
+
+<!-- ============ C1 ============ -->
+<figure>
+  <div class="kicker">C1 · 首选项 — 对齐现有 dialog_basic_settings</div>
+  <div class="desktop" style="padding-bottom:30px;">
+    <div class="menubar">
+      <span class="apple"></span><span class="bold">RekoBox</span>
+      <span>文件</span><span>编辑</span><span>程序</span><span>服务器</span><span>窗口</span>
+      <span class="right">
+        <svg class="mb" viewBox="0 0 24 24"><path d="M3.5 9.2a13 13 0 0117 0"/><path d="M6.6 12.6a8.5 8.5 0 0110.8 0"/><path d="M9.6 16a4 4 0 014.8 0"/><circle cx="12" cy="19" r="1.1" fill="currentColor" stroke="none"/></svg>
+        <svg class="mb" viewBox="0 0 24 24"><rect x="2" y="8" width="17" height="8" rx="2.2"/><rect x="4" y="10" width="11" height="4" rx="1" fill="currentColor" stroke="none"/><path d="M21 11v2"/></svg>
+        <span>19:42</span>
+      </span>
+    </div>
+
+    <div class="win prefs" style="margin-top:26px;">
+      <div class="titlebar">
+        <div class="lights"><i class="r"></i><i class="y"></i><i class="g"></i></div>
+        <div class="title">首选项</div>
+      </div>
+      <div class="pref-tabs">
+        <div class="pt active">基础设置</div>
+        <div class="pt">网络</div>
+        <div class="pt">路由</div>
+        <div class="pt">订阅</div>
+        <div class="pt">外观</div>
+      </div>
+      <div class="pref-body">
+        <div class="frow"><label>语言</label><div class="ctl"><div class="input" style="width:190px;">简体中文<span class="caret">▼</span></div></div></div>
+        <div class="frow"><label>主题</label><div class="ctl"><div class="input" style="width:190px;">跟随系统<span class="caret">▼</span></div>
+          <span class="hint">深色需 QSS 变量支持，见 §9.3</span></div></div>
+        <div class="frow"><label>混合端口</label><div class="ctl"><div class="input" style="width:96px;">2080</div>
+          <span class="hint">系统代理使用 HTTP，端口复用</span></div></div>
+        <div class="frow"><label>TUN 协议栈</label><div class="ctl"><div class="input" style="width:150px;">mixed<span class="caret">▼</span></div>
+          <span class="hint">macOS 仅 auto_route 可用</span></div></div>
+        <div class="frow"><label>开机启动</label><div class="ctl"><span class="box on"></span><span class="hint">SMAppService，可在"登录项"中关闭</span></div></div>
+        <div class="frow"><label>启动时最小化</label><div class="ctl"><span class="box on"></span><span class="hint">只留菜单栏图标</span></div></div>
+        <div class="frow"><label>关闭窗口时</label><div class="ctl"><div class="input" style="width:190px;">隐藏到菜单栏<span class="caret">▼</span></div></div></div>
+      </div>
+      <div class="pref-foot">
+        <div class="b">取消</div>
+        <div class="b pri">应用</div>
+      </div>
+    </div>
+  </div>
+  <figcaption>
+    沿用 <code>dialog_basic_settings.ui</code> 的左右两栏布局（标签右对齐 + 控件左对齐），
+    只把 Windows 专属项（注册表自启、UAC）替换为 macOS 语义（登录项、菜单栏）。
+  </figcaption>
+</figure>
+
+<div class="notes" style="margin-top:6px;">
+  <b>配色与控件基准</b>
+  <div class="legend">
+    <span><i style="background:#0a7cff"></i>强调色 / 选中</span>
+    <span><i style="background:#2fbf5a"></i>延迟 &lt; 100 ms</span>
+    <span><i style="background:#e0a020"></i>100–200 ms</span>
+    <span><i style="background:#e07a20"></i>&gt; 200 ms</span>
+    <span><i style="background:#a0a0a6"></i>超时</span>
+  </div>
+  <p style="margin:10px 0 0;">
+    所有窗口按现有 <code>mainwindow.ui</code> 的真实控件尺寸重绘（工具栏 62px、标签 28px、表格行 30px、状态栏 28px），
+    QSS 基础为 Fusion + <code>neko.css</code>。真实 Qt 渲染的字体度量会有 1–2px 差异，不影响布局判断。
+  </p>
+</div>
+
+</div>
+</body>
+</html>

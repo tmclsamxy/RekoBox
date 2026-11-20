@@ -35,6 +35,9 @@
 #ifdef Q_OS_LINUX
 #include "sys/linux/LinuxCap.h"
 #endif
+#ifdef Q_OS_MACOS
+#include "sys/macos/MacPlatform.hpp"
+#endif
 #include <unistd.h>
 #endif
 
@@ -1847,8 +1850,11 @@ bool MainWindow::StartVPNProcess() {
     //
     vpn_process->setProcessChannelMode(QProcess::ForwardedChannels);
 #ifdef Q_OS_MACOS
-    vpn_process->start("osascript", {"-e", QStringLiteral("do shell script \"%1\" with administrator privileges")
-                                               .arg("bash " + scriptPath)});
+    // 两层转义：shell 单引号（路径可能有空格）→ AppleScript 双引号字符串
+    const auto shellCmd = "bash " + NekoGui_mac::ShellQuote(scriptPath);
+    vpn_process->start("osascript",
+                       {"-e", QStringLiteral("do shell script \"%1\" with administrator privileges")
+                                      .arg(NekoGui_mac::AppleScriptString(shellCmd))});
 #else
     vpn_process->start("pkexec", {"bash", scriptPath});
 #endif

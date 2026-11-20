@@ -1,5 +1,15 @@
 cmake_minimum_required(VERSION 3.16)
 
+# macOS：默认只出 arm64，部署目标 13.0（SMAppService 需要）
+if (APPLE)
+    if (NOT CMAKE_OSX_ARCHITECTURES)
+        set(CMAKE_OSX_ARCHITECTURES "arm64" CACHE STRING "Target architecture" FORCE)
+    endif ()
+    if (NOT CMAKE_OSX_DEPLOYMENT_TARGET)
+        set(CMAKE_OSX_DEPLOYMENT_TARGET "13.0" CACHE STRING "Minimum macOS version" FORCE)
+    endif ()
+endif ()
+
 project(rekobox VERSION 0.1 LANGUAGES CXX)
 
 set(CMAKE_INCLUDE_CURRENT_DIR ON)
@@ -40,6 +50,8 @@ list(GET NKR_RC_PARTS 2 NKR_RC_PATCH)
 #### Platform Variables ####
 if (WIN32)
     include("cmake/windows/windows.cmake")
+elseif (APPLE)
+    include("cmake/macos/macos.cmake")
 else ()
     include("cmake/linux/linux.cmake")
 endif ()
@@ -291,6 +303,20 @@ set_property(TARGET rekobox PROPERTY AUTORCC ON)
 set_target_properties(rekobox PROPERTIES
         WIN32_EXECUTABLE TRUE
 )
+
+# macOS：app bundle（qt_add_executable 在 mac 上默认已开 MACOSX_BUNDLE，这里补元数据）
+if (APPLE)
+    set_target_properties(rekobox PROPERTIES
+            OUTPUT_NAME "RekoBox"
+            MACOSX_BUNDLE TRUE
+            MACOSX_BUNDLE_BUNDLE_NAME "RekoBox"
+            MACOSX_BUNDLE_GUI_IDENTIFIER "io.rekobox.mac"
+            MACOSX_BUNDLE_ICON_FILE "rekobox.icns"
+            MACOSX_BUNDLE_BUNDLE_VERSION "${NKR_RC_VERSION}"
+            MACOSX_BUNDLE_SHORT_VERSION_STRING "${NKR_RC_VERSION}"
+            MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/cmake/macos/Info.plist.in"
+    )
+endif ()
 
 # Target Source Translations
 

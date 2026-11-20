@@ -18,6 +18,10 @@
 #include "sys/windows/MiniDump.h"
 #endif
 
+#ifdef Q_OS_MACOS
+#include "sys/macos/MacPlatform.hpp"
+#endif
+
 void signal_handler(int signum) {
     if (qApp) {
         GetMainWindow()->on_commitDataRequest();
@@ -105,7 +109,12 @@ int main(int argc, char* argv[]) {
         if (!NekoGui::dataStore->appdataDir.isEmpty()) {
             wd.setPath(NekoGui::dataStore->appdataDir);
         } else {
+#ifdef Q_OS_MACOS
+            // AppConfigLocation 在 macOS 上是 ~/Library/Preferences，不能放数据
+            wd.setPath(NekoGui_mac::DataDir());
+#else
             wd.setPath(QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation));
+#endif
         }
     }
     if (!wd.exists()) wd.mkpath(wd.absolutePath());
@@ -116,6 +125,11 @@ int main(int argc, char* argv[]) {
     // init QApplication
     delete preQApp;
     QApplication a(argc, argv);
+
+#ifdef Q_OS_MACOS
+    // 固定 Fusion + 系统字体：与 Windows 版观感一致（详见 docs/06-macos-port.md §9.1）
+    NekoGui_mac::ApplyLook();
+#endif
 
     // dispatchers
     DS_cores = new QThread;

@@ -1,0 +1,26 @@
+# 统一换行符：脚本与源码在 Windows / macOS / Linux 上都用 LF，
+# 避免从 Windows 传到 Mac 后 bash 报 "$'\r': command not found"。
+
+* text=auto eol=lf
+
+*.sh    text eol=lf
+*.go    text eol=lf
+*.py    text eol=lf
+*.cpp   text eol=lf
+*.hpp   text eol=lf
+*.h     text eol=lf
+*.mm    text eol=lf
+*.cmake text eol=lf
+*.txt   text eol=lf
+*.md    text eol=lf
+*.json  text eol=lf
+*.qrc   text eol=lf
+*.plist.in text eol=lf
+
+# 二进制资源保持原样
+*.png   binary
+*.ico   binary
+*.icns  binary
+*.qm    binary
+*.zip   binary
+*.bundle binary

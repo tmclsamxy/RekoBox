@@ -822,8 +822,14 @@ namespace NekoGui {
         return {};
 #endif
         // gen script
+#ifdef Q_OS_MACOS
+        // macOS 版没有 iptables，只把内核拉起来
+        auto scriptFn = ":/neko/vpn/vpn-run-root-macos.sh";
+        if (QFile::exists("vpn/vpn-run-root-macos.sh")) scriptFn = "vpn/vpn-run-root-macos.sh";
+#else
         auto scriptFn = ":/neko/vpn/vpn-run-root.sh";
         if (QFile::exists("vpn/vpn-run-root.sh")) scriptFn = "vpn/vpn-run-root.sh";
+#endif
         auto script = ReadFileText(scriptFn)
                           .replace("./rekobox_core", QApplication::applicationDirPath() + "/rekobox_core")
                           .replace("$CONFIG_PATH", configPath);

@@ -2,13 +2,16 @@
 
 一个跨平台的代理客户端，源自 [NekoBox for Android](https://github.com/MatsuriDayo/NekoBoxForAndroid)（GPL-3.0）。
 
+> **刚拿到这份代码、准备在 Mac 上开发？** → [`START-HERE.md`](START-HERE.md)
+> 开发 macOS 端的接手说明：[`RekoboxForMac/docs/HANDOFF.md`](RekoboxForMac/docs/HANDOFF.md)
+
 ```
 Rekobox/
 ├── RekoboxForAndroid/     Android 版（Kotlin + gomobile 内核，包名 io.rekobox）
-├── RekoboxForWindows/     Windows 版（nekoray 移植，Qt6 Widgets + MinGW）
-├── RekoboxForMac/         macOS 版（规划中）
+├── RekoboxForWindows/     Windows 版（nekoray 移植，Qt6 Widgets + MinGW）；同时是桌面端共享树
+├── RekoboxForMac/         macOS 版（骨架，构建入口在共享树里）
 ├── docs/                  改名清单、移植方案、发布流程
-├── sing-box/              内核源码（Android libcore 与 Windows rekobox_core 共用，不入库）
+├── sing-box/              内核源码（Android libcore 与桌面端 rekobox_core 共用，不入库）
 └── libneko/               Go 辅助库（同上，不入库）
 ```
 
@@ -18,7 +21,7 @@ Rekobox/
 |---|---|---|
 | **Android** | `RekoboxForAndroid/` | v1.0.1 已发布；`io.rekobox`，4 个 split ABI；改名基于 NekoBox |
 | **Windows** | `RekoboxForWindows/` | nekoray 4.0.1 移植：Qt6.7 + MinGW 构建通过，与 Android 共用 sing-box 内核（含 VLESS Encryption / Vision），已实机运行 |
-| **macOS** | `RekoboxForMac/` | 规划中，界面层参考 Windows 的 Qt 实现 |
+| **macOS** | `RekoboxForMac/` | 骨架已完成（Apple Silicon / arm64），**尚未在 Mac 上编译**。方案 [`docs/06-macos-port.md`](docs/06-macos-port.md)，交接 [`RekoboxForMac/docs/HANDOFF.md`](RekoboxForMac/docs/HANDOFF.md)，效果图在 `RekoboxForMac/mockups/`。源码复用 `RekoboxForWindows/`（CMake 按平台分支，不复制副本） |
 
 ## 发布
 
@@ -71,6 +74,19 @@ bash libs/build_all_mingw.sh          # 依赖 → 内核 → CMake → 编译 �
 curl --proxy http://127.0.0.1:2080 https://ip.sb
 ```
 
+### macOS（Apple Silicon，进行中）
+
+```bash
+brew install cmake ninja go
+python3 -m aqt install-qt mac desktop 6.7.2 clang_64 -O ~/Qt --archives qtbase qtsvg qttools
+
+bash RekoboxForWindows/libs/build_deps_macos.sh   # 依赖（版本与 Windows 对齐）
+bash RekoboxForWindows/libs/get_source_local.sh   # 内核源码
+bash RekoboxForWindows/libs/build_macos.sh        # → RekoboxForMac/build/RekoBox.app
+```
+
+第一次编译的预期问题与修法见 `RekoboxForMac/docs/HANDOFF.md` §4。
+
 ## 服务端（可选，一条命令）
 
 节点池服务端 `rekosync` 跑在任意 Linux VPS 上：管理员在网页控制台粘贴分享链接维护节点、
@@ -115,6 +131,7 @@ sudo bash <(curl -fsSL https://raw.githubusercontent.com/tmclsamxy/RekoBox/main/
 | `docs/03-release.md` | 发布流程与产物约定 |
 | `docs/04-account-sync.md` | 账号与节点池：只读订阅模型、网页控制台、接口、权限、离线策略、服务端部署 |
 | `docs/05-acl-permission-groups.md` | 权限组：账号/组/节点模型、迁移、按组鉴权、版本失效机制、测试与上线 |
+| `docs/06-macos-port.md` | macOS 移植方案：界面一致性结论、共享树决策、M2 工具链、TUN 权限、签名公证、风险清单 |
 
 ## 许可
 

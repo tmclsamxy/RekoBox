@@ -9,6 +9,10 @@
 #include <QHostAddress>
 #include <QHostInfo>
 
+#ifdef Q_OS_MACOS
+#include "sys/macos/MacPlatform.hpp"
+#endif
+
 #define BOX_UNDERLYING_DNS dataStore->core_box_underlying_dns.isEmpty() ? "local" : dataStore->core_box_underlying_dns
 
 namespace NekoGui {
@@ -788,9 +792,21 @@ namespace NekoGui {
         // nekoray 原本靠 route 里的 process_name 排除自己，但这一版 sing-tun 在 darwin
         // 上不提供 ProcessInfo，process_name 规则在 mac 上是空转的（实测）。
         //
-        // 所以从路由层面挖洞：节点地址 + 局域网直连，其余照常走 tun。
-        QStringList out{"127.0.0.0/8", "192.168.0.0/16", "10.0.0.0/8",
-                        "172.16.0.0/12", "169.254.0.0/16", "224.0.0.0/4"};
+        // 所以只把**节点地址**挖出去。局域网故意留给 tun —— 和 Windows 端一致：
+        // 系统 DNS 指向 172.19.0.2（见 sys/macos/MacPlatform.cpp 的 ApplyTunDNS），
+        // 那个地址靠默认路由进 tun，被 "port 53 → dns-out" 规则劫持；
+        // 局域网其余流量由模板里"ip_cidr 内网 → direct"那条规则直出。
+        //
+        // ⚠️ 绝对不能把 172.16.0.0/12 加回这个列表：172.19.0.2 就在里面，
+        // 一旦被排除，DNS 查询根本不进 tun（曾踩过，现象是"接管后整机解析挂掉"）。
+        // 255.255.255.255 也要留在外面：DHCP 续租走的就是广播，
+        // 被 tun 吞掉的话跑够一个租期（十几小时）就可能掉 IP。
+        //
+        // 8.8.8.8 是模板里 dns-remote 的上游。它由 tun 内核经 socks 交给**主内核**去连，
+        // 而主内核的 socket 不受 tun 保护 —— 不排除的话这条查询也会被 tun 抓回来，
+        // 再次进 dns-out → dns-remote → 形成 DNS 递归，日志刷屏、整机解析卡死。
+        QStringList out{"127.0.0.0/8", "169.254.0.0/16", "224.0.0.0/4",
+                        "255.255.255.255/32", "8.8.8.8/32"};
         auto addAddr = [&out](const QHostAddress &addr) {
             if (addr.isNull()) return;
             switch (addr.protocol()) {
@@ -860,9 +876,32 @@ namespace NekoGui {
         for (const auto &cidr: excludeList) quoted << QStringLiteral("\"%1\"").arg(cidr);
         auto route_exclude = QStringLiteral(R"("route_exclude_address": [%1],)").arg(quoted.join(", "));
 
+        // macOS：系统 DNS 会被指向 127.0.0.1，所以这里必须多起一个 53 端口监听，
+        // 否则域名解析直接没有服务应答。
+        //
+        // 两个坑（都实测过）：
+        //   1. 不能把系统 DNS 指到 tun 地址（172.19.0.1）——那是 utun 自己的地址，
+        //      内核本地投递、包不进 utun，同网段的 .2/.3 也不应答；
+        //   2. 用了 127.0.0.1 之后，dns-direct 不能再回落到"系统 DNS"（=local），
+        //      否则变成自己查自己。所以这里显式给一个真实上游。
+        QString dns_node_rule;
+        QString underlying_dns = BOX_UNDERLYING_DNS;
+#ifdef Q_OS_MACOS
+        underlying_dns = NekoGui_mac::TunDNSUpstream();
+
+        // 域名节点 + 接管 DNS 会打结：主内核要解析节点域名 → 问 127.0.0.1 →
+        // tun 内核 → dns-remote → 走 socks 回到主内核 → 主内核又要解析节点域名。
+        // 所以节点域名单独走 dns-direct（真实上游、直连），把这个环拆掉。
+        if (!serverAddress.trimmed().isEmpty() && QHostAddress(serverAddress.trimmed()).isNull()) {
+            dns_node_rule = QStringLiteral(R"({"domain": ["%1"], "server": "dns-direct"},)")
+                                    .arg(serverAddress.trimmed());
+        }
+#endif
+
         auto config = ReadFileText(configFn)
                           .replace("//%IPV6_ADDRESS%", dataStore->vpn_ipv6 ? R"("inet6_address": "fdfe:dcba:9876::1/126",)" : "")
                           .replace("//%ROUTE_EXCLUDE%", route_exclude)
+                          .replace("//%DNS_NODE_RULE%", dns_node_rule)
                           .replace("//%SOCKS_USER_PASS%", socks_user_pass)
                           .replace("//%PROCESS_NAME_RULE%", process_name_rule)
                           .replace("//%CIDR_RULE%", cidr_rule)
@@ -871,7 +910,7 @@ namespace NekoGui {
                           .replace("%TUN_NAME%", genTunName())
                           .replace("%STRICT_ROUTE%", genStrictRoute() ? "true" : "false")
                           .replace("%FINAL_OUT%", no_match_out)
-                          .replace("%DNS_ADDRESS%", BOX_UNDERLYING_DNS)
+                          .replace("%DNS_ADDRESS%", underlying_dns)
                           .replace("%FAKE_DNS_INBOUND%", dataStore->fake_dns ? "tun-in" : "empty")
                           .replace("%PORT%", Int2String(dataStore->inbound_socks_port));
         // write config

@@ -1577,6 +1577,19 @@ void MainWindow::show_log_impl(const QString &log) {
                 break;
             }
         }
+#ifdef Q_OS_MACOS
+        // TUN 开着时整机流量都进内核，info 级别下面板会被"正常连接"淹没
+        // （实测 240 行/秒，5125 行里零错误，其中 1563 行是同一个目标在重试 QUIC）。
+        // 面板只留错误/告警和我们自己的提示；完整日志仍在 config/neko.log，排查不受影响。
+        if (showThisLine && NekoGui::dataStore->spmode_vpn) {
+            const auto lower = line.toLower();
+            const bool keep = lower.contains("error") || lower.contains("warn") ||
+                              lower.contains("panic") || lower.contains("fatal") ||
+                              line.startsWith("[mac]") || line.startsWith("[tun]") ||
+                              line.startsWith(">>>>>>>>");
+            if (!keep) showThisLine = false;
+        }
+#endif
         if (showThisLine) newLines << line;
     }
     if (newLines.isEmpty()) return;
@@ -1866,7 +1879,27 @@ bool MainWindow::StartVPNProcess() {
         }
     });
     //
-    vpn_process->setProcessChannelMode(QProcess::ForwardedChannels);
+    // 之前用 ForwardedChannels，TUN 内核的输出直接进了 App 的 stderr——从 Finder 启动时
+    // 等于扔进黑洞，出问题只能靠猜（已经吃过两次亏）。这里改成自己收：
+    // 全量写 config/neko-tun.log 便于事后查，面板只回显错误/告警，避免刷屏。
+    vpn_process->setProcessChannelMode(QProcess::MergedChannels);
+    connect(vpn_process, &QProcess::readyRead, this, [vpn_process] {
+        const auto output = QString::fromUtf8(vpn_process->readAll());
+        if (output.isEmpty()) return;
+
+        QFile log(QDir::current().absoluteFilePath("neko-tun.log"));
+        if (log.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text)) {
+            log.write(output.toUtf8());
+        }
+
+        for (const auto &line: output.split('\n', Qt::SkipEmptyParts)) {
+            const auto lower = line.toLower();
+            if (lower.contains("error") || lower.contains("panic") || lower.contains("fatal") ||
+                lower.contains("warn")) {
+                MW_show_log("[tun] " + line.left(300));
+            }
+        }
+    });
 #ifdef Q_OS_MACOS
     // 两层转义：shell 单引号（路径可能有空格）→ AppleScript 双引号字符串
     const auto shellCmd = "bash " + NekoGui_mac::ShellQuote(scriptPath);
@@ -1879,10 +1912,30 @@ bool MainWindow::StartVPNProcess() {
     vpn_process->waitForStarted();
     vpn_pid = vpn_process->processId(); // actually it's pkexec or bash PID
 
-    // 注：曾尝试在 TUN 起来后把系统 DNS 改到 tun 地址（172.19.0.1）来接管解析，
-    // 实测不可行——172.19.0.1 是 utun 自己的地址，内核本地投递、包根本不进 utun；
-    // 而且 sing-box 的 dns-direct 用"系统 DNS"，改完会变成自己查自己（死循环）。
-    // 结论写进 HANDOFF §4.1，真要接管得另起一个 127.0.0.1:53 监听并固定上游 DNS。
+#ifdef Q_OS_MACOS
+    // 接管系统 DNS：照安卓的做法，指向 tun 网段里的 172.19.0.2（安卓的
+    // PRIVATE_VLAN4_ROUTER 就是它），查询会进 utun，被 "port 53 → dns-out" 规则接住。
+    // 硬编码公共 DNS 不走这条路，由 tun 路由直接捕获，两条都覆盖。
+    //
+    // 必须先探测到应答再切：探测不通就保持原样（域名继续走路由器），
+    // 宁可没接管，也不能让整机解析挂掉。
+    auto tries = std::make_shared<int>(0);
+    auto probe = std::make_shared<std::function<void()>>();
+    *probe = [this, tries, probe] {
+        if (vpn_pid == 0) return; // tun 已经退了，别再动 DNS
+        if (NekoGui_mac::ProbeDNS("172.19.0.2", 53)) {
+            NekoGui_mac::ApplyTunDNS(true);
+            MW_show_log("[mac] 系统 DNS 已接管到 172.19.0.2（走 tun 内核解析）");
+            return;
+        }
+        if (++(*tries) >= 4) {
+            MW_show_log("[Warn][mac] tun 的 DNS 没应答，这次不接管系统 DNS（域名仍由路由器解析）");
+            return;
+        }
+        QTimer::singleShot(800, this, [probe] { (*probe)(); });
+    };
+    QTimer::singleShot(1200, this, [probe] { (*probe)(); });
+#endif
 #endif
     return true;
 }
@@ -1892,9 +1945,8 @@ bool MainWindow::StopVPNProcess(bool unconditional) {
         bool ok;
         core_process->processId();
 #ifdef Q_OS_MACOS
-        // DNS 接管方案已废弃（见 StartVPNProcess 里的注释），这里只做残留清理：
-        // 旧版本留下的 tun-dns-state.json 会被还原并删除，没有文件时是空操作
-        NekoGui_mac::ApplyTunDNS(false);
+        // 只做残留清理：早期试验版留下的 tun-dns-state.json 会被还原删除，没有就是空操作
+        NekoGui_mac::RecoverTunDNSIfNeeded();
 #endif
 #ifdef Q_OS_WIN
         auto ret = WinCommander::runProcessElevated("taskkill", {"/IM", "rekobox_core.exe",

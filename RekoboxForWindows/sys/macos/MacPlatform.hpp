@@ -20,14 +20,28 @@ namespace NekoGui_mac {
     // 转义成 AppleScript 双引号字符串的内容（do shell script "..."）
     QString AppleScriptString(const QString &s);
 
-    // TUN 模式下接管系统 DNS。
-    // 背景：sing-tun 在 darwin 上不会给 utun 下发 DNS（Linux/Windows 才会），
-    // 不接管的话域名仍由路由器解析——既可能被污染，也是明文泄漏。
-    // enable=true：把各网络服务的 DNS 指向 tun 地址，并把原值落盘（tun-dns-state.json）；
-    // enable=false：按快照还原（原本是 DHCP 的要还原成 Empty，不是写死某个 IP）。
+    // TUN 模式下接管系统 DNS —— 照安卓的做法（VpnService.addDnsServer 用的就是
+    // 172.19.0.2，即 PRIVATE_VLAN4_ROUTER）：把各网络服务的 DNS 指向 tun 网段里的
+    // 这个地址，查询会进 utun，由 tun 配置里 "port 53 → dns-out" 规则劫持。
+    //
+    // 为什么不用 tun 自己的地址 172.19.0.1：那是接口地址，内核本地投递，包不进 utun。
+    // 为什么 172.19.0.2 能行：它只是网段里的普通地址，走默认路由进 tun。
+    // **前提**：route_exclude_address 里不能包含 172.16.0.0/12（曾踩过，被排除后就不进 tun 了）。
+    //
+    // 硬编码公共 DNS（8.8.8.8 之类）不靠这个，由 tun 路由直接捕获，两条路都覆盖。
+    // enable=true 时落盘快照后改；false 按快照还原（原本 DHCP 的还原成 Empty）。
     void ApplyTunDNS(bool enable);
 
     // 启动时清理上次异常退出（崩溃 / 强杀）留下的 DNS 改动，否则整机解析不了域名
     void RecoverTunDNSIfNeeded();
+
+    // 探测 server:port 有没有 DNS 在应答（最小查询 + 比对事务 ID）。
+    // 切换系统 DNS 前必须探测通过，否则会有一段"DNS 指向没人监听的地址"→整机解析挂掉。
+    bool ProbeDNS(const QString &server, int port, int timeoutMs = 900);
+
+    // 取一个"真实可用"的上游 DNS，给 tun 配置的 dns-direct / dns-in override 用。
+    // 顺序：显式配置的 DNS > 系统当前解析器 > 223.5.5.5。
+    // 绝不能返回 127.0.0.1 —— 接管后那就是它自己，会自环。
+    QString TunDNSUpstream();
 
 } // namespace NekoGui_mac

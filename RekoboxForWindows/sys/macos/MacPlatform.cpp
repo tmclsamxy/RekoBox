@@ -8,16 +8,20 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QHostAddress>
 #include <QProcess>
+#include <QUdpSocket>
 #include <QStandardPaths>
 #include <QStyle>
 #include <QStyleFactory>
 
 namespace {
     constexpr auto DNS_STATE_FILE = "tun-dns-state.json";
-    // 必须和 res/vpn/sing-box-vpn.json 里的 inet4_address 一致（172.19.0.1/28）：
-    // sing-box 的 tun 会接住发往这个地址的 53 端口查询，交给 dns-out 走 fakeip
-    constexpr auto TUN_DNS_ADDRESS = "172.19.0.1";
+    // 与安卓端一致：VpnService.addDnsServer(PRIVATE_VLAN4_ROUTER)，值就是 172.19.0.2。
+    // 必须落在 tun 的 inet4_address 网段内（172.19.0.1/28），且不能是接口地址本身。
+    constexpr auto TUN_DNS_ADDRESS = "172.19.0.2";
+    // 探测不到任何可用上游时的兜底（阿里 DNS，国内可用性最好）
+    constexpr auto FALLBACK_DNS = "223.5.5.5";
 
     QString DnsStatePath() {
         // 运行期 cwd 就是 config 目录（main.cpp 里 setCurrent 过）
@@ -91,45 +95,75 @@ namespace NekoGui_mac {
         return out;
     }
 
+    QString TunDNSUpstream() {
+        QStringList found;
+
+        // 1) 用户在网络设置里显式配过 DNS 的，优先用（公司/局域网 DNS 往往只有内网能解析）
+        for (const auto &service: NetworkServices()) {
+            auto out = NetSet({"-getdnsservers", service});
+            if (out.contains("aren't any")) continue;
+            for (const auto &line: out.split('\n', Qt::SkipEmptyParts)) {
+                const auto v = line.trimmed();
+                if (!v.isEmpty()) found << v;
+            }
+        }
+
+        // 2) 没显式配（走 DHCP）就取系统当前解析器
+        if (found.isEmpty()) {
+            QProcess p;
+            p.start("/usr/sbin/scutil", {"--dns"});
+            if (p.waitForFinished(5000)) {
+                for (const auto &line: QString::fromUtf8(p.readAllStandardOutput()).split('\n', Qt::SkipEmptyParts)) {
+                    const auto l = line.trimmed();
+                    // nameserver[0] 常常是 fe80 链路本地，IPv4 往往在 [1]，所以全取
+                    if (!l.startsWith("nameserver[")) continue;
+                    const auto v = l.section(':', 1).trimmed();
+                    if (!v.isEmpty()) found << v;
+                }
+            }
+        }
+
+        // 3) 挑一个能用的：跳过回环（那会自环）和链路本地，IPv4 优先
+        QString ipv6;
+        for (auto v: found) {
+            v = v.trimmed();
+            if (v.isEmpty() || v == "127.0.0.1" || v == "::1") continue;
+            if (v.startsWith("fe80")) continue; // 链路本地需要 scope，sing-box 里不好写
+            QHostAddress addr(v);
+            if (addr.isNull()) continue;
+            if (addr.protocol() == QAbstractSocket::IPv4Protocol) return v;
+            if (ipv6.isEmpty()) ipv6 = v;
+        }
+        if (!ipv6.isEmpty()) return ipv6;
+        return QString::fromLatin1(FALLBACK_DNS);
+    }
+
+    bool ProbeDNS(const QString &server, int port, int timeoutMs) {
+        // 最小 DNS 查询：ID(2) + flags(2) + QDCOUNT(1) + 保留(6) + example.com A IN
+        QByteArray query;
+        query.append(char(0xAB)).append(char(0xCD)); // ID，用来认回包
+        query.append(char(0x01)).append(char(0x00)); // 标准查询 + 递归
+        query.append(char(0x00)).append(char(0x01)); // QDCOUNT = 1
+        query.append(6, '\0');                      // AN / NS / AR = 0
+        query.append(char(7)).append("example", 7);
+        query.append(char(3)).append("com", 3);
+        query.append(char(0));
+        query.append(char(0x00)).append(char(0x01)); // QTYPE = A
+        query.append(char(0x00)).append(char(0x01)); // QCLASS = IN
+
+        QUdpSocket sock;
+        sock.writeDatagram(query, QHostAddress(server), quint16(port));
+        if (!sock.waitForReadyRead(timeoutMs)) return false;
+        QByteArray reply;
+        reply.resize(int(sock.pendingDatagramSize()));
+        const auto n = sock.readDatagram(reply.data(), reply.size());
+        return n >= 12 && quint8(reply[0]) == 0xAB && quint8(reply[1]) == 0xCD;
+    }
+
     void ApplyTunDNS(bool enable) {
         const auto statePath = DnsStatePath();
 
-        if (enable) {
-            // 已经接管过就别再抓一次：否则会把 tun 地址当成"用户原本的 DNS"存下来，
-            // 还原时写回 172.19.0.1，TUN 一停就整机解析不了（和系统代理那边同一个坑）
-            if (QFile::exists(statePath)) {
-                qDebug() << "[mac] DNS already taken over, keep the original snapshot";
-                return;
-            }
-
-            QJsonArray snapshot;
-            for (const auto &service: NetworkServices()) {
-                auto out = NetSet({"-getdnsservers", service});
-                QStringList dns;
-                // 没设置过时 networksetup 回 "There aren't any DNS Servers set on <service>."
-                if (!out.contains("aren't any")) {
-                    for (const auto &line: out.split('\n', Qt::SkipEmptyParts)) {
-                        const auto v = line.trimmed();
-                        if (!v.isEmpty()) dns << v;
-                    }
-                }
-                snapshot.append(QJsonObject{{"service", service},
-                                            {"dns", QJsonArray::fromStringList(dns)}});
-            }
-
-            QFile f(statePath);
-            if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-                qDebug() << "[mac] cannot write DNS state:" << f.errorString();
-                return;
-            }
-            f.write(QJsonDocument(QJsonObject{{"services", snapshot}}).toJson(QJsonDocument::Indented));
-            f.close();
-
-            for (const auto &service: NetworkServices()) {
-                NetSet({"-setdnsservers", service, TUN_DNS_ADDRESS});
-            }
-            qDebug() << "[mac] system DNS ->" << TUN_DNS_ADDRESS << "(snapshot:" << statePath << ")";
-        } else {
+        if (!enable) {
             QFile f(statePath);
             if (!f.exists()) return;
             if (!f.open(QIODevice::ReadOnly)) {
@@ -150,11 +184,47 @@ namespace NekoGui_mac {
             }
             QFile::remove(statePath);
             qDebug() << "[mac] system DNS restored";
+            return;
         }
+
+        // 已经接管过就别再抓一次：否则会把 tun 地址当成"用户原本的 DNS"存下来，
+        // 还原时写回 172.19.0.2，TUN 一停就整机解析不了
+        if (QFile::exists(statePath)) {
+            qDebug() << "[mac] DNS already taken over, keep the original snapshot";
+            return;
+        }
+
+        QJsonArray snapshot;
+        for (const auto &service: NetworkServices()) {
+            auto out = NetSet({"-getdnsservers", service});
+            QStringList dns;
+            // 没设置过时 networksetup 回 "There aren't any DNS Servers set on <service>."
+            if (!out.contains("aren't any")) {
+                for (const auto &line: out.split('\n', Qt::SkipEmptyParts)) {
+                    const auto v = line.trimmed();
+                    if (!v.isEmpty()) dns << v;
+                }
+            }
+            snapshot.append(QJsonObject{{"service", service},
+                                        {"dns", QJsonArray::fromStringList(dns)}});
+        }
+
+        QFile f(statePath);
+        if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+            qDebug() << "[mac] cannot write DNS state:" << f.errorString();
+            return;
+        }
+        f.write(QJsonDocument(QJsonObject{{"services", snapshot}}).toJson(QJsonDocument::Indented));
+        f.close();
+
+        for (const auto &service: NetworkServices()) {
+            NetSet({"-setdnsservers", service, TUN_DNS_ADDRESS});
+        }
+        qDebug() << "[mac] system DNS ->" << TUN_DNS_ADDRESS;
     }
 
     void RecoverTunDNSIfNeeded() {
-        // 只有非正常退出才会留下文件：正常停 TUN / 退出程序都会还原并删掉
+        // 只有非正常退出才会留下快照：正常停 TUN / 退出程序都会还原并删掉
         if (!QFile::exists(DnsStatePath())) return;
         qDebug() << "[mac] leftover tun DNS detected, restoring before startup";
         ApplyTunDNS(false);

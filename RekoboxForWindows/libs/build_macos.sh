@@ -147,6 +147,50 @@ else
     echo "跳过 Qt 翻译：$QT_TR_SRC 不存在（aqt 需 --archives qttranslations）"
 fi
 
+# ---------------------------------------------------------------- 5.5 规则集 .srs
+# sing-box 1.12 起 geoip:/geosite: 规则改成了 route.rule_set 引用 .srs。
+# Windows 打包会把常用集合塞进安装目录（离线可用），mac 之前漏了这步，
+# 于是内核回退到 remote 地址直连 raw.githubusercontent.com —— 国内必然超时，
+# 表现是"启动配置失败：initialize rule-set ... operation timed out"。
+step "准备规则集 .srs"
+SRS_CACHE="$ROOT/res/_geodata/srs"
+mkdir -p "$SRS_CACHE"
+SRS_TAGS="geosite-cn geosite-geolocation-cn geosite-geolocation-!cn geosite-category-ads-all
+          geosite-google geosite-telegram geosite-youtube
+          geoip-cn geoip-hk geoip-tw geoip-jp geoip-sg geoip-us"
+
+fetch_srs() { # tag
+    local tag="$1"
+    local out="$SRS_CACHE/$tag.srs"
+    [ -s "$out" ] && return 0
+    local repo="sing-geosite"
+    case "$tag" in geoip-*) repo="sing-geoip" ;; esac
+    # 直连 → jsDelivr 镜像（国内直连 raw.githubusercontent 基本必超时）
+    for url in \
+        "https://raw.githubusercontent.com/SagerNet/$repo/rule-set/$tag.srs" \
+        "https://cdn.jsdelivr.net/gh/SagerNet/$repo@rule-set/$tag.srs"; do
+        if curl -fsSL --retry 3 --retry-delay 1 --max-time 60 -o "$out.tmp" "$url"; then mv "$out.tmp" "$out"; return 0; fi
+        rm -f "$out.tmp"
+    done
+    # 最后试本机代理（内核在跑的时候 2080 可用）
+    if nc -z 127.0.0.1 2080 2>/dev/null &&
+       curl -x http://127.0.0.1:2080 -fsSL --retry 2 --max-time 60 -o "$out.tmp" \
+            "https://raw.githubusercontent.com/SagerNet/$repo/rule-set/$tag.srs"; then
+        mv "$out.tmp" "$out"
+        return 0
+    fi
+    rm -f "$out.tmp"
+    return 1
+}
+
+SRS_FAIL=0
+for tag in $SRS_TAGS; do
+    fetch_srs "$tag" || { echo "  !! $tag 下载失败（运行时会回退远程，国内可能超时）"; SRS_FAIL=$((SRS_FAIL + 1)); }
+done
+# FindCoreAsset() 在 mac 上只查 applicationDirPath（Contents/MacOS）
+cp -f "$SRS_CACHE"/*.srs "$APP/Contents/MacOS/" 2>/dev/null || true
+echo "规则集: $(ls "$APP/Contents/MacOS"/*.srs 2>/dev/null | wc -l | tr -d ' ') 个（失败 ${SRS_FAIL}）"
+
 # ---------------------------------------------------------------- 6. 签名（ad-hoc）
 step "ad-hoc 签名"
 # 早期构建会在 bundle 里留一个断链的 updater -> launcher（Linux 才需要），

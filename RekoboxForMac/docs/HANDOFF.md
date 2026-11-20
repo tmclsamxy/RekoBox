@@ -410,6 +410,16 @@ RekoboxForMac/                     ← 只放 mac 专属的东西，不放源码
 Gatekeeper 的"已验证开发者"检查，但不会再报"已损坏"。要免这一步只能买 Developer ID
 走公证，流程见 `docs/06-macos-port.md` §7，`hdiutil/codesign/notarytool` 三条命令都在那儿。
 
+**已发布的产物**（tag 命名约定：`mac-v<版本>`，对齐 `win-v<版本>` / `server-v<版本>`）：
+
+| tag | 产物 | 说明 |
+|---|---|---|
+| `mac-v1.0.15` | `Rekobox-1.0.15-mac-arm64.dmg`（41MB）+ `.zip` | Apple Silicon 首版，ad-hoc 签名，release 说明里附了 SHA-256 |
+
+发新版本的步骤：改 `RekoboxForWindows/nekoray_version.txt` → `bash libs/build_macos.sh --dmg`
+→ `ditto -c -k --keepParent build/RekoBox.app dist/Rekobox-<版本>-mac-arm64.zip`
+→ GitHub 建 release（tag `mac-v<版本>`，挂 dmg + zip）。
+
 **P4**
 
 - [ ] `SMAppService` 登录项（替掉废弃的 `LSSharedFileList`）

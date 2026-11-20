@@ -28,6 +28,7 @@ Rekobox/
 |---|---|---|---|
 | Android | v1.0.6 | 4 个 split APK | [releases/tag/v1.0.6](https://github.com/tmclsamxy/RekoBox/releases/tag/v1.0.6) |
 | Windows | win-v1.0.15 | `Rekobox-1.0.15-windows-x64-qt.zip` + `rekosync` 服务端 | [releases/tag/win-v1.0.15](https://github.com/tmclsamxy/RekoBox/releases/tag/win-v1.0.15) |
+| 服务端 | server-v2.1.0 | `rekosync` 单文件二进制（linux amd64/arm64/arm、windows amd64、darwin amd64/arm64）+ `SHA256SUMS` | [releases/tag/server-v2.1.0](https://github.com/tmclsamxy/RekoBox/releases/tag/server-v2.1.0) |
 
 ## 架构差异（为什么不是一套代码编译两次）
 
@@ -72,8 +73,9 @@ curl --proxy http://127.0.0.1:2080 https://ip.sb
 
 ## 服务端（可选，一条命令）
 
-节点池服务端 `rekosync` 跑在任意 Linux VPS 上：管理员在网页控制台粘贴分享链接维护节点，
-客户端登录后**只读**拉取，任何人（包括自己）都无法上传或改动别人的节点。
+节点池服务端 `rekosync` 跑在任意 Linux VPS 上：管理员在网页控制台粘贴分享链接维护节点、
+用**权限组**决定每个账号能看到哪些节点，客户端登录后**只读**拉取，任何人（包括自己）
+都无法上传或改动别人的节点。
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/tmclsamxy/RekoBox/main/RekoboxForWindows/server/deploy.sh | sudo bash
@@ -112,6 +114,7 @@ sudo bash <(curl -fsSL https://raw.githubusercontent.com/tmclsamxy/RekoBox/main/
 | `docs/02-windows-port.md` | Windows 移植方案：架构差异、目录结构、分阶段步骤 |
 | `docs/03-release.md` | 发布流程与产物约定 |
 | `docs/04-account-sync.md` | 账号与节点池：只读订阅模型、网页控制台、接口、权限、离线策略、服务端部署 |
+| `docs/05-acl-permission-groups.md` | 权限组：账号/组/节点模型、迁移、按组鉴权、版本失效机制、测试与上线 |
 
 ## 许可
 

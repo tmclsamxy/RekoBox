@@ -23,15 +23,22 @@
 
 ## 1. 权限模型
 
-| 角色 | 登录网页控制台 | `GET /api/v1/nodes` | 管理接口 | 上传 |
+v2.1 起节点下发按**权限组**鉴权，详见 [`05-acl-permission-groups.md`](05-acl-permission-groups.md)。
+三层结构：角色（能否进管理面）→ 权限组（能拿哪些节点）→ 兜底策略（没分组怎么办）。
+
+| 账号状态 | 登录网页控制台 | `GET /api/v1/nodes` | 管理接口 | 上传 |
 |---|---|---|---|---|
-| `admin` | ✅ | ✅ | ✅ | ❌ |
-| `user` | ❌ | ✅ | ❌（403） | ❌ |
+| `admin` | ✅ | ✅ 全部启用节点（不受组限制） | ✅ | ❌ |
+| `user` + 有权限组 | ❌ | ✅ 各组节点并集 ∩ 启用节点 | ❌（403） | ❌ |
+| `user` + 未分组，策略 `open`（默认） | ❌ | ✅ 全部启用节点（升级前的行为） | ❌（403） | ❌ |
+| `user` + 未分组，策略 `closed` | ❌ | ✅ 空 | ❌（403） | ❌ |
 
 - 账号不开放注册，全部由 CLI 或控制台创建（`-addadmin` / `-adduser`）。
 - 令牌是 32 字节随机数的 base64url，服务端只存 SHA-256；`expires_at = 0` 表示不过期。
 - 令牌失效的四种情况：用户注销、管理员改口令、管理员禁用/删号。
 - 客户端拿到 401 时清会话退回本地模式，节点数据不动，界面提示重新登录。
+- **权限组或归属变更不需要重新登录**：判定在每次请求时做，且会把节点池版本 +1，
+  客户端下一轮拉取即生效。
 
 **为什么没有上传**：早期版本是「每账号一份节点快照，双向同步」。多人共用时这个模型必然
 互相踩——一个用户改名/删节点就会影响别人。现在改成单一节点池由管理员维护，
@@ -52,14 +59,14 @@
 | 方法 | 路径 | 鉴权 | 说明 |
 |---|---|---|---|
 | GET | `/api/v1/health` | 否 | 探活 `{ok,name,version,time,uptime_sec}` |
-| POST | `/api/v1/auth/login` | 否 | `{username,password,device}` → `{token,expires_at,user{name,role},nodes{count,read_only}}` |
+| POST | `/api/v1/auth/login` | 否 | `{username,password,device}` → `{token,expires_at,user{name,role,groups},nodes{count,read_only,restricted}}` |
 | POST | `/api/v1/auth/logout` | 是 | 吊销当前令牌 |
-| GET | `/api/v1/auth/me` | 是 | 账号 + 节点池 `{version,updated_at,count}` |
-| GET | `/api/v1/nodes` | 是 | 启用中的节点，按管理员排序 |
+| GET | `/api/v1/auth/me` | 是 | 账号 + 权限组 + 可见节点数 + 节点池 `{version,updated_at}` |
+| GET | `/api/v1/nodes` | 是 | **本账号权限组内的**启用节点，按管理员排序 |
 | GET | `/api/v1/nodes?version=N` | 是 | 版本未变时只回 `{unchanged:true}`，省流量 |
 | PUT/GET | `/api/v1/vault` | 是 | 旧协议兼容：PUT 固定 **403**，GET 固定 204 |
 
-`GET /api/v1/nodes` 响应：
+`GET /api/v1/nodes` 响应（`restricted=true` 表示结果已被权限组裁剪）：
 
 ```json
 {
@@ -67,6 +74,7 @@
   "updated_at": 1794473678040,
   "count": 2,
   "read_only": true,
+  "restricted": true,
   "nodes": [
     {"id":"d9c0b6c156f9","name":"香港-01","type":"tuic",
      "addr":"203.0.113.10","port":25247,"group":"香港","remark":"示例备注",
@@ -90,12 +98,19 @@
 | DELETE | `nodes/{id}` | 删一条 |
 | POST | `nodes/batch` | `{ids:[…], action:"enable"\|"disable"\|"delete"}` |
 | POST | `nodes/order` | `{ids:[…]}` 按给定顺序重排 |
-| GET/POST | `users` | 列表 / `{name,password,role}` 建号 |
+| GET/POST | `users` | 列表 / `{name,password,role,groups?}` 建号 |
 | DELETE | `users/{name}` | 删号（连带吊销令牌） |
 | POST | `users/{name}/password` | `{password}`（吊销该账号旧令牌） |
 | POST | `users/{name}/state` | `{disabled:true\|false}`（禁用即吊销令牌） |
+| POST | `users/{name}/groups` | `{groups:[组id]}` 设置账号归属 |
+| GET/POST | `groups` | 权限组列表（含 `node_count`）/ `{name,description,nodes?}` 建组 |
+| PATCH | `groups/{id}` | `{name?,description?}` |
+| DELETE | `groups/{id}` | 删组（同时摘掉账号上的归属） |
+| POST | `groups/{id}/nodes` | `{ids:[节点id]}` 设置该组可访问的节点 |
+| POST | `acl/policy` | `{default_policy:"open"\|"closed"}` 未分组账号策略 |
 
-不能删除/禁用"当前正在使用的管理员账号"。
+不能删除/禁用"当前正在使用的管理员账号"。权限组的模型、迁移与验证见
+[`05-acl-permission-groups.md`](05-acl-permission-groups.md)。
 
 ### 2.3 节点链接解析
 
@@ -121,11 +136,12 @@ tuic://  hysteria2://  hy2://  naive+https://  naive+quic://
 
 | 区域 | 功能 |
 |---|---|
-| 概览卡片 | 节点总数、启用数、账号数、节点池版本与更新时间 |
+| 概览卡片 | 节点总数、启用数、账号数、权限组数、节点池版本与更新时间 |
 | 节点管理 | 搜索（名称/地址/分组/备注）、分组与状态筛选、批量启停/删除、上下移排序、编辑、复制链接 |
 | 添加节点 | 多行粘贴链接，可带分组/备注；逐条显示成功与拒绝原因 |
-| 账号管理 | 建号（普通/管理员）、改口令、禁用/启用、删除；显示在线设备数与最后活动时间 |
-| 接入说明 | 客户端填法、协议清单、接口一览 |
+| 权限组 | 建组/改名/删除、勾选组的可访问节点（搜索/全选/清空）、切换未分组账号的兜底策略并提示受影响账号 |
+| 账号管理 | 建号（普通/管理员）、分配权限组、改口令、禁用/启用、删除；显示可见节点数、在线设备数与最后活动时间 |
+| 接入说明 | 客户端填法、权限模型、协议清单、接口一览 |
 
 安全：
 
@@ -266,7 +282,7 @@ tar czf rekosync-$(date +%F).tgz -C /opt/rekosync data
 
 ## 7. 已知限制
 
-1. **单进程服务**：账号/令牌/节点池缓存在内存，多开同一 `data` 目录会互相覆盖。
+1. **单进程服务**：账号/令牌/节点池/权限组缓存在内存，多开同一 `data` 目录会互相覆盖。
 2. **改端口等于换链接**：服务端只按 `link` 判断有没有变化，编辑节点链接才会推给客户端。
 3. **本地改动不上传**：这是设计目标，不是缺陷。需要共享的改动请交给管理员。
 4. **不同端的本地改动互不影响**：同一账号在 Windows 与 Android 上各自可改本地副本，
@@ -274,6 +290,11 @@ tar czf rekosync-$(date +%F).tgz -C /opt/rekosync data
 5. **旧快照留着不删**：`data/vaults/*.json` 不再读写，确认不需要后可手工删除。
 6. **节点链接含明文密钥**：`data/nodes.json` 里是明文，磁盘请做加密或严格权限
    （默认 0600/0700）。
+7. **权限组收回节点 = 客户端删除本地节点**：客户端看到的是「服务端列表里没有」，
+   于是按既有规则把本地那条删掉（正在运行则延后）。这是预期行为，但用户会觉得
+   「节点突然消失」，调整权限前最好知会一声。
+8. **权限变更会让所有客户端重拉一次**：全局版本号机制，账号很多时有一点额外流量。
+9. **权限组不能给管理员设限**：管理员始终全量可见，否则会把自己锁在控制台外。
 
 ---
 
@@ -333,12 +354,15 @@ files/sync/nodes.json   服务端节点 id → {local_id, hash}
 
 | 文件 | 职责 |
 |---|---|
-| `server/nodes.go` | 节点池存储、分享链接解析、排序与去重 |
-| `server/api.go` | 客户端接口：登录、`GET /nodes`、旧 vault 兼容、日志中间件 |
-| `server/admin.go` | 管理接口分发、概览、账号管理、内嵌网页 |
+| `server/nodes.go` | 节点池存储、分享链接解析、排序与去重、按 id 集合过滤 |
+| `server/acl.go` | 权限组存储（`acl.json`）、兜底策略、`Scope()` 计算可见集合 |
+| `server/api.go` | 客户端接口：登录、`GET /nodes`（按权限组过滤）、旧 vault 兼容、日志中间件 |
+| `server/admin.go` | 管理接口分发、概览、账号管理、权限组管理、内嵌网页 |
 | `server/web/admin.html` | 网页控制台（单文件，内联 CSS/JS） |
-| `server/store.go` | 账号/令牌（PBKDF2、SHA-256 令牌键）、角色与禁用 |
+| `server/store.go` | 账号/令牌（PBKDF2、SHA-256 令牌键）、角色、禁用、账号归属 |
 | `server/main.go` | CLI 子命令、HTTP 启动、优雅退出 |
+| `server/acl_test.go` | 权限组单测（13 个用例） |
+| `server/smoke-acl.sh` | 端到端自检脚本（真服务 + curl，25 项断言） |
 | `sync/SyncEngine.{hpp,cpp}` | 拉取状态机、链接→实体、落地与清理 |
 | `sync/SyncStore.{hpp,cpp}` | `state.json` / `nodes.json` 读写 |
 | `sync/SyncApi.{hpp,cpp}` | Qt Network 封装：Bearer、20s 超时、错误文案 |

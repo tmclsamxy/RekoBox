@@ -32,14 +32,22 @@ python -m http.server 8000
 
 ## 1. 落地
 
+**优先：直接从 GitHub 拉**（仓库已推送，含全部历史；Mac 有网就用这个，最干净）
+
 ```bash
 cd ~
-git clone ~/Downloads/Rekobox-mac-dev.bundle Rekobox     # 用 bundle
+git clone https://github.com/tmclsamxy/RekoBox.git Rekobox
+cd Rekobox
+git log --oneline -1         # 应看到 docs: 补充从 GitHub 直接 clone 的方式
+```
+
+没有网/不想等，用本地包：
+
+```bash
+cd ~
+git clone ~/Downloads/Rekobox-mac-dev.bundle Rekobox     # bundle
 # 或者
 mkdir -p ~/Rekobox && cd ~/Rekobox && unzip ~/Downloads/Rekobox-mac-dev.zip
-
-cd ~/Rekobox
-git log --oneline -3         # 应看到 feat(macos): 共享树接入 APPLE 分支 + 交接文档
 ```
 
 ---

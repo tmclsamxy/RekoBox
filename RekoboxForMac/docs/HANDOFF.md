@@ -15,8 +15,10 @@
 macOS 端不新建工程：直接给 `RekoboxForWindows/`（桌面共享树）加 `APPLE` 分支，
 同一套 Qt 6.7 Widgets 源码编出 `.app`。
 
-**你不在这台机器上写历史？** 项目是用 `git bundle` 打包带过来的（含完整提交历史，
-不含构建产物）。克隆方式见 §0.5。
+**你不在这台机器上写历史？** 项目已经推到 GitHub（`tmclsamxy/RekoBox`，含全部 745 个提交），
+`git clone https://github.com/tmclsamxy/RekoBox.git ~/Rekobox` 即可。
+
+也可以离线用 `git bundle` 打包带过来（含完整历史，不含构建产物），见 §0.5。
 
 ---
 

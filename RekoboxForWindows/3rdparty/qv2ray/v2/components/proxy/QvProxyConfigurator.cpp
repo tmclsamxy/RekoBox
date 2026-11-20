@@ -15,6 +15,11 @@
 
 #include <QStandardPaths>
 #include <QProcess>
+#include <QDateTime>
+#include <QDir>
+#include <QFile>
+#include <QJsonArray>
+#include <QJsonObject>
 
 #include "3rdparty/fix_old_qt.h"
 #include "3rdparty/qv2ray/wrapper.hpp"
@@ -52,6 +57,213 @@ namespace Qv2ray::components::proxy {
         LOG("Found " + QSTRN(result.size()) + " network services: " + result.join(";"));
         return result;
     }
+
+    // ---------------------------------------------------------------- 状态快照
+    //
+    // networksetup 设置的代理写在系统配置里，进程被 kill -9 时没有任何回调机会，
+    // 重启后残留的 127.0.0.1:2080 会让整机看起来"断网"（浏览器全部超时）。
+    // 所以动系统代理之前，先把每个网络服务**原本的状态**落盘；退出（或下次启动）
+    // 时按快照还原，而不是无脑全关——用户可能本来就挂着自己的公司代理。
+    namespace {
+        constexpr auto PROXY_STATE_FILE = "system-proxy-state.json";
+
+        QString MacProxyStatePath() {
+            // 运行期 cwd 就是 config 目录（main.cpp 里 setCurrent 过）
+            auto dir = QDir::current();
+            if (!dir.absolutePath().isEmpty() && dir.exists()) {
+                return dir.absoluteFilePath(PROXY_STATE_FILE);
+            }
+            return QDir(QStandardPaths::writableLocation(QStandardPaths::AppDataLocation)).absoluteFilePath(PROXY_STATE_FILE);
+        }
+
+        QString MacNetSet(const QStringList &args) {
+            QProcess p;
+            p.start("/usr/sbin/networksetup", args);
+            if (!p.waitForFinished(15000)) {
+                p.kill();
+                p.waitForFinished(1000);
+                LOG("networksetup timeout: " + args.join(" "));
+                return {};
+            }
+            if (p.exitCode() != 0) {
+                LOG("networksetup failed(" + QSTRN(p.exitCode()) + "): " + args.join(" "));
+            }
+            return QString::fromUtf8(p.readAllStandardOutput());
+        }
+
+        // 从 "Enabled: Yes\nServer: 127.0.0.1\nPort: 2080" 里取字段
+        QString MacField(const QString &out, const QString &key) {
+            for (const auto &line: SplitLines(out)) {
+                if (line.startsWith(key + ":")) {
+                    return line.mid(key.length() + 1).trimmed();
+                }
+            }
+            return {};
+        }
+
+        struct MacServiceProxy {
+            QString service;
+            bool web = false;
+            int webPort = 0;
+            QString webServer;
+            bool secure = false;
+            int securePort = 0;
+            QString secureServer;
+            bool socks = false;
+            int socksPort = 0;
+            QString socksServer;
+            bool autoOn = false;
+            QString autoUrl;
+            QStringList bypass;
+
+            QJsonObject ToJson() const {
+                return QJsonObject{
+                        {"service", service},
+                        {"web", web}, {"web_port", webPort}, {"web_server", webServer},
+                        {"secure", secure}, {"secure_port", securePort}, {"secure_server", secureServer},
+                        {"socks", socks}, {"socks_port", socksPort}, {"socks_server", socksServer},
+                        {"auto", autoOn}, {"auto_url", autoUrl},
+                        {"bypass", QJsonArray::fromStringList(bypass)},
+                };
+            }
+
+            static MacServiceProxy FromJson(const QJsonObject &o) {
+                MacServiceProxy s;
+                s.service = o["service"].toString();
+                s.web = o["web"].toBool();
+                s.webPort = o["web_port"].toInt();
+                s.webServer = o["web_server"].toString();
+                s.secure = o["secure"].toBool();
+                s.securePort = o["secure_port"].toInt();
+                s.secureServer = o["secure_server"].toString();
+                s.socks = o["socks"].toBool();
+                s.socksPort = o["socks_port"].toInt();
+                s.socksServer = o["socks_server"].toString();
+                s.autoOn = o["auto"].toBool();
+                s.autoUrl = o["auto_url"].toString();
+                for (const auto &v: o["bypass"].toArray()) s.bypass << v.toString();
+                return s;
+            }
+        };
+
+        MacServiceProxy MacCaptureService(const QString &service) {
+            MacServiceProxy s;
+            s.service = service;
+
+            // 没配过的字段 networksetup 会回文字 "(null)"，当成空串存，
+            // 否则还原时会被当成一个真的服务器地址写回去
+            auto clean = [](QString v) {
+                return v == "(null)" ? QString() : v;
+            };
+
+            auto web = MacNetSet({"-getwebproxy", service});
+            s.web = MacField(web, "Enabled").compare("Yes", Qt::CaseInsensitive) == 0;
+            s.webServer = clean(MacField(web, "Server"));
+            s.webPort = MacField(web, "Port").toInt();
+
+            auto secure = MacNetSet({"-getsecurewebproxy", service});
+            s.secure = MacField(secure, "Enabled").compare("Yes", Qt::CaseInsensitive) == 0;
+            s.secureServer = clean(MacField(secure, "Server"));
+            s.securePort = MacField(secure, "Port").toInt();
+
+            auto socks = MacNetSet({"-getsocksfirewallproxy", service});
+            s.socks = MacField(socks, "Enabled").compare("Yes", Qt::CaseInsensitive) == 0;
+            s.socksServer = clean(MacField(socks, "Server"));
+            s.socksPort = MacField(socks, "Port").toInt();
+
+            auto pac = MacNetSet({"-getautoproxyurl", service});
+            s.autoOn = MacField(pac, "Enabled").compare("Yes", Qt::CaseInsensitive) == 0;
+            s.autoUrl = clean(MacField(pac, "URL"));
+            // 空的时候 networksetup 返回 "There aren't any bypass domains set on <service>."
+            auto domains = MacNetSet({"-getproxybypassdomains", service});
+            if (!domains.contains("aren't any")) {
+                for (const auto &line: SplitLines(domains)) {
+                    if (!line.trimmed().isEmpty()) s.bypass << line.trimmed();
+                }
+            }
+            return s;
+        }
+
+        bool MacSaveState(const QList<MacServiceProxy> &list) {
+            QJsonArray arr;
+            for (const auto &s: list) arr.append(s.ToJson());
+            QJsonObject root{{"services", arr}, {"since", QDateTime::currentDateTime().toString(Qt::ISODate)}};
+
+            QFile f(MacProxyStatePath());
+            if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+                LOG("cannot write proxy state: " + f.errorString());
+                return false;
+            }
+            f.write(QJsonDocument(root).toJson(QJsonDocument::Indented));
+            f.close();
+            return true;
+        }
+
+        bool MacLoadState(QList<MacServiceProxy> &list) {
+            QFile f(MacProxyStatePath());
+            if (!f.exists() || !f.open(QIODevice::ReadOnly)) return false;
+            auto doc = QJsonDocument::fromJson(f.readAll());
+            f.close();
+            if (!doc.isObject()) return false;
+            for (const auto &v: doc.object()["services"].toArray()) {
+                auto s = MacServiceProxy::FromJson(v.toObject());
+                if (!s.service.isEmpty()) list << s;
+            }
+            return !list.isEmpty();
+        }
+
+        void MacRestoreService(const MacServiceProxy &s) {
+            // 先把地址/端口写回去，再按"原本是开还是关"落开关。
+            // 只写开关的话地址会留成我们的 2080，用户下次打开自己的代理客户端
+            // 之前先看到一串错的值（而且 networksetup 改地址本身就会把开关打开，
+            // 所以顺序必须是 地址 → 开关）。
+            if (!s.webServer.isEmpty() && s.webPort > 0) {
+                MacNetSet({"-setwebproxy", s.service, s.webServer, QSTRN(s.webPort)});
+            }
+            MacNetSet({"-setwebproxystate", s.service, s.web ? "on" : "off"});
+
+            if (!s.secureServer.isEmpty() && s.securePort > 0) {
+                MacNetSet({"-setsecurewebproxy", s.service, s.secureServer, QSTRN(s.securePort)});
+            }
+            MacNetSet({"-setsecurewebproxystate", s.service, s.secure ? "on" : "off"});
+
+            if (!s.socksServer.isEmpty() && s.socksPort > 0) {
+                MacNetSet({"-setsocksfirewallproxy", s.service, s.socksServer, QSTRN(s.socksPort)});
+            }
+            MacNetSet({"-setsocksfirewallproxystate", s.service, s.socks ? "on" : "off"});
+
+            if (!s.autoUrl.isEmpty()) {
+                MacNetSet({"-setautoproxyurl", s.service, s.autoUrl});
+            }
+            MacNetSet({"-setautoproxystate", s.service, s.autoOn ? "on" : "off"});
+
+            if (s.bypass.isEmpty()) {
+                MacNetSet({"-setproxybypassdomains", s.service, "Empty"});
+            } else {
+                MacNetSet(QStringList{"-setproxybypassdomains", s.service} + s.bypass);
+            }
+        }
+
+        void MacApplyService(const QString &service, int httpPort, int socksPort, bool hasHTTP, bool hasSOCKS) {
+            const QString address = "127.0.0.1";
+            // 顺序：先设地址再开开关，反过来的话可能带着旧地址先启用
+            if (hasHTTP) {
+                MacNetSet({"-setwebproxy", service, address, QSTRN(httpPort)});
+                MacNetSet({"-setwebproxystate", service, "on"});
+                MacNetSet({"-setsecurewebproxy", service, address, QSTRN(httpPort)});
+                MacNetSet({"-setsecurewebproxystate", service, "on"});
+            }
+
+            if (hasSOCKS) {
+                MacNetSet({"-setsocksfirewallproxy", service, address, QSTRN(socksPort)});
+                MacNetSet({"-setsocksfirewallproxystate", service, "on"});
+            }
+
+            // 本地/内网直连，否则访问自己的 NAS、打印机、localhost 都要绕一圈
+            MacNetSet({"-setproxybypassdomains", service, "localhost", "127.0.0.1", "::1",
+                       "*.local", "169.254/16", "192.168.*.*", "10.*.*.*", "172.16.*.*", "172.31.*.*"});
+        }
+    } // namespace
 #endif
 #ifdef Q_OS_WIN
 #define NO_CONST(expr) const_cast<wchar_t *>(expr)
@@ -361,21 +573,23 @@ namespace Qv2ray::components::proxy {
         if (results.count(true) != actions.size()) {
             LOG("Something wrong when setting proxies.");
         }
-#else
+#elif defined(Q_OS_MACOS)
+        auto services = macOSgetNetworkServices();
 
-        for (const auto &service: macOSgetNetworkServices()) {
+        // 只在"第一次改动前"记录原始状态。清单已存在说明就是我们改的，
+        // 此时再抓一次会把 127.0.0.1:2080 当成用户的原始配置存起来，还原就失效了。
+        if (!QFile::exists(MacProxyStatePath())) {
+            QList<MacServiceProxy> snapshot;
+            for (const auto &service: services) snapshot << MacCaptureService(service);
+            MacSaveState(snapshot);
+            LOG("system proxy state saved: " + MacProxyStatePath());
+        } else {
+            LOG("system proxy state already exists, keep the original snapshot");
+        }
+
+        for (const auto &service: services) {
             LOG("Setting proxy for interface: " + service);
-            if (hasHTTP) {
-                QProcess::execute("/usr/sbin/networksetup", {"-setwebproxystate", service, "on"});
-                QProcess::execute("/usr/sbin/networksetup", {"-setsecurewebproxystate", service, "on"});
-                QProcess::execute("/usr/sbin/networksetup", {"-setwebproxy", service, address, QSTRN(httpPort)});
-                QProcess::execute("/usr/sbin/networksetup", {"-setsecurewebproxy", service, address, QSTRN(httpPort)});
-            }
-
-            if (hasSOCKS) {
-                QProcess::execute("/usr/sbin/networksetup", {"-setsocksfirewallproxystate", service, "on"});
-                QProcess::execute("/usr/sbin/networksetup", {"-setsocksfirewallproxy", service, address, QSTRN(socksPort)});
-            }
+            MacApplyService(service, httpPort, socksPort, hasHTTP, hasSOCKS);
         }
 
 #endif
@@ -426,15 +640,37 @@ namespace Qv2ray::components::proxy {
             DEBUG(QStringLiteral("[%1] Program: %2, Args: %3").arg(returnCode).arg(action.first).arg(action.second.join(";")));
         }
 
-#else
-        for (const auto &service: macOSgetNetworkServices()) {
-            LOG("Clearing proxy for interface: " + service);
-            QProcess::execute("/usr/sbin/networksetup", {"-setautoproxystate", service, "off"});
-            QProcess::execute("/usr/sbin/networksetup", {"-setwebproxystate", service, "off"});
-            QProcess::execute("/usr/sbin/networksetup", {"-setsecurewebproxystate", service, "off"});
-            QProcess::execute("/usr/sbin/networksetup", {"-setsocksfirewallproxystate", service, "off"});
+#elif defined(Q_OS_MACOS)
+        QList<MacServiceProxy> snapshot;
+        if (MacLoadState(snapshot)) {
+            // 按快照还原到"我们动手之前"的样子，而不是一律关掉
+            for (const auto &s: snapshot) {
+                LOG("Restoring proxy for interface: " + s.service);
+                MacRestoreService(s);
+            }
+            QFile::remove(MacProxyStatePath());
+            LOG("system proxy restored to the snapshot taken before we touched it");
+        } else {
+            // 没有快照（旧版本残留 / 文件被删）：保守地全部关掉，先保证能上网
+            LOG("no proxy snapshot, turning all proxies off");
+            for (const auto &service: macOSgetNetworkServices()) {
+                LOG("Clearing proxy for interface: " + service);
+                MacNetSet({"-setautoproxystate", service, "off"});
+                MacNetSet({"-setwebproxystate", service, "off"});
+                MacNetSet({"-setsecurewebproxystate", service, "off"});
+                MacNetSet({"-setsocksfirewallproxystate", service, "off"});
+            }
         }
 
+#endif
+    }
+
+    void RecoverSystemProxyIfNeeded() {
+#ifdef Q_OS_MACOS
+        // 只有"非正常退出"才会留下清单：正常退出在 on_menu_exit_triggered 里已经还原并删掉了
+        if (!QFile::exists(MacProxyStatePath())) return;
+        LOG("leftover system proxy detected, restoring before startup");
+        ClearSystemProxy();
 #endif
     }
 } // namespace Qv2ray::components::proxy

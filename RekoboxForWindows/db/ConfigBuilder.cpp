@@ -24,9 +24,21 @@ namespace NekoGui {
     QString genTunName() {
         auto tun_name = "neko-tun";
 #ifdef Q_OS_MACOS
-        tun_name = "utun9";
+        // 留空 = 让 sing-box 自己挑 utunN。写死 utun9 会和 Tailscale / WireGuard /
+        // 其他 VPN 抢同一个网卡名，抢不到就直接起不来。
+        tun_name = "";
 #endif
         return tun_name;
+    }
+
+    bool genStrictRoute() {
+        if (!dataStore->vpn_strict_route) return false;
+#ifdef Q_OS_MACOS
+        // macOS 上 sing-box 没实现 strict_route（Linux 的 nftables 语义），
+        // 传 true 只会被忽略并打警告，干脆不写
+        return false;
+#endif
+        return true;
     }
 
     void MergeJson(QJsonObject &dst, const QJsonObject &src) {
@@ -425,7 +437,7 @@ namespace NekoGui {
             inboundObj["endpoint_independent_nat"] = true;
             inboundObj["mtu"] = dataStore->vpn_mtu;
             inboundObj["stack"] = Preset::SingBox::VpnImplementation.value(dataStore->vpn_implementation);
-            inboundObj["strict_route"] = dataStore->vpn_strict_route;
+            inboundObj["strict_route"] = genStrictRoute();
             inboundObj["inet4_address"] = "172.19.0.1/28";
             if (dataStore->vpn_ipv6) inboundObj["inet6_address"] = "fdfe:dcba:9876::1/126";
             if (dataStore->routing->sniffing_mode != SniffingMode::DISABLE) {
@@ -803,7 +815,7 @@ namespace NekoGui {
                           .replace("%MTU%", Int2String(dataStore->vpn_mtu))
                           .replace("%STACK%", Preset::SingBox::VpnImplementation.value(dataStore->vpn_implementation))
                           .replace("%TUN_NAME%", genTunName())
-                          .replace("%STRICT_ROUTE%", dataStore->vpn_strict_route ? "true" : "false")
+                          .replace("%STRICT_ROUTE%", genStrictRoute() ? "true" : "false")
                           .replace("%FINAL_OUT%", no_match_out)
                           .replace("%DNS_ADDRESS%", BOX_UNDERLYING_DNS)
                           .replace("%FAKE_DNS_INBOUND%", dataStore->fake_dns ? "tun-in" : "empty")

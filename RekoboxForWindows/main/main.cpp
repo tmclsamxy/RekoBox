@@ -1,4 +1,5 @@
 #include <csignal>
+#include <unistd.h>
 
 #include <QApplication>
 #include <QDir>
@@ -7,10 +8,13 @@
 #include <QStandardPaths>
 #include <QLocalSocket>
 #include <QLocalServer>
+#include <QLibraryInfo>
+#include <QSocketNotifier>
 #include <QThread>
 
 #include "3rdparty/RunGuard.hpp"
 #include "main/NekoGui.hpp"
+#include "3rdparty/qv2ray/v2/components/proxy/QvProxyConfigurator.hpp"
 
 #include "ui/mainwindow_interface.h"
 
@@ -28,6 +32,21 @@ void signal_handler(int signum) {
         qApp->exit();
     }
 }
+
+#ifdef Q_OS_MACOS
+// macOS 上 SIGTERM/SIGINT 可能在 Qt 或 CFRunLoop 内部被投递，直接在 handler 里调
+// Qt（保存配置、退出事件循环）会破坏堆——实测退出时报 "malloc: Double free"，
+// 保存的数据也可能被写坏。自管道（self-pipe）是标准做法：handler 里只 write 一个字节，
+// 真正的处理搬到事件循环线程。
+static int g_sigpipe[2] = {-1, -1};
+
+static void mac_signal_relay(int) {
+    if (g_sigpipe[1] >= 0) {
+        const char c = 1;
+        (void) write(g_sigpipe[1], &c, 1); // async-signal-safe
+    }
+}
+#endif
 
 QTranslator* trans = nullptr;
 QTranslator* trans_qt = nullptr;
@@ -47,8 +66,22 @@ void loadTranslate(const QString& locale) {
     if (trans->load(":/translations/" + locale + ".qm")) {
         QCoreApplication::installTranslator(trans);
     }
-    if (trans_qt->load(QApplication::applicationDirPath() + "/qtbase_" + locale + ".qm")) {
-        QCoreApplication::installTranslator(trans_qt);
+    // Qt 自带的 qtbase_*.qm 位置随平台不同：
+    //   Windows/Linux: applicationDirPath()（部署脚本会拷进去）
+    //   macOS bundle:  Contents/Resources/translations（macdeployqt 的布局）
+    // 所以按候选目录依次找，别写死一个。
+    const QString qtQm = "qtbase_" + locale + ".qm";
+    const QStringList candidates{
+            QLibraryInfo::path(QLibraryInfo::TranslationsPath),
+            QApplication::applicationDirPath() + "/../Resources/translations",
+            QApplication::applicationDirPath(),
+    };
+    for (const auto& dir: candidates) {
+        if (dir.isEmpty()) continue;
+        if (trans_qt->load(QDir(dir).absoluteFilePath(qtQm))) {
+            QCoreApplication::installTranslator(trans_qt);
+            break;
+        }
     }
 }
 
@@ -130,6 +163,10 @@ int main(int argc, char* argv[]) {
     // 固定 Fusion + 系统字体：与 Windows 版观感一致（详见 docs/06-macos-port.md §9.1）
     NekoGui_mac::ApplyLook();
 #endif
+
+    // 上次被强杀（kill -9 / 崩溃）会留下指向 127.0.0.1 的系统代理，整机表现为断网。
+    // 这一步必须在开窗口之前跑完：清干净再让用户看到"已连接"。
+    RecoverSystemProxyIfNeeded();
 
     // dispatchers
     DS_cores = new QThread;
@@ -235,8 +272,25 @@ int main(int argc, char* argv[]) {
     loadTranslate(locale);
 
     // Signals
+#ifdef Q_OS_MACOS
+    if (pipe(g_sigpipe) == 0) {
+        signal(SIGTERM, mac_signal_relay);
+        signal(SIGINT, mac_signal_relay);
+        auto sig_notifier = new QSocketNotifier(g_sigpipe[0], QSocketNotifier::Read, &a);
+        QObject::connect(sig_notifier, &QSocketNotifier::activated, &a, [&a] {
+            char c = 0;
+            (void) read(g_sigpipe[0], &c, 1);
+            qDebug() << "signal received, shutting down from the event loop";
+            signal_handler(0); // 此刻已经在事件循环线程里，调 Qt 是安全的
+        });
+    } else {
+        signal(SIGTERM, signal_handler);
+        signal(SIGINT, signal_handler);
+    }
+#else
     signal(SIGTERM, signal_handler);
     signal(SIGINT, signal_handler);
+#endif
 
     // QLocalServer
     QLocalServer server;

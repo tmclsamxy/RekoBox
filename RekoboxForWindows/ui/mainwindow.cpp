@@ -235,9 +235,16 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
 
     // Setup Tray
     tray = new QSystemTrayIcon(this); // 初始化托盘对象tray
-    tray->setIcon(Icon::GetTrayIcon(Icon::NONE));
+    tray->setIcon(Icon::GetTrayQIcon(Icon::NONE));
     tray->setContextMenu(ui->menu_program); // 创建托盘菜单
     tray->show();                           // 让托盘图标显示在系统托盘上
+#ifdef Q_OS_MACOS
+    // 菜单栏项是 mac 上最容易"静默失败"的一环（图标不显示、点了没反应都不报错），
+    // 启动时把状态打出来，出问题时 `open -W` 或终端里跑就能看到
+    qDebug() << "[mac] tray available:" << QSystemTrayIcon::isSystemTrayAvailable()
+             << "visible:" << tray->isVisible()
+             << "supportsMessages:" << QSystemTrayIcon::supportsMessages();
+#endif
     connect(tray, &QSystemTrayIcon::activated, this, [=](QSystemTrayIcon::ActivationReason reason) {
         if (reason == QSystemTrayIcon::Trigger) {
             if (this->isVisible()) {
@@ -935,7 +942,7 @@ void MainWindow::refresh_status(const QString &traffic_update) {
     // refresh tray
     if (tray != nullptr) {
         tray->setToolTip(make_title(true));
-        if (icon_status_new != icon_status) tray->setIcon(Icon::GetTrayIcon(icon_status_new));
+        if (icon_status_new != icon_status) tray->setIcon(Icon::GetTrayQIcon(icon_status_new));
     }
 
     icon_status = icon_status_new;

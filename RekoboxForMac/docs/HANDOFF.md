@@ -98,6 +98,18 @@ mkdir -p ~/Rekobox && cd ~/Rekobox && unzip ~/Downloads/Rekobox-mac-dev.zip
 | 界面 | 工具栏四图标正常、Fusion 观感、五列表格、状态栏、日志面板均正常（见 §3 Step 4） |
 | 签名 | ad-hoc；`Identifier=io.rekobox.mac`（修 Info.plist 之前是自动生成 ID） |
 
+### 1.2 P2 实测结论（同日）
+
+| 项 | 结果 |
+|---|---|
+| 系统代理 | 设置 / 取消 / `kill -9` 后重启自愈全部通过，详见 §3 Step 5。快照记录的是**每个服务原本的状态**，还原后连用户原来那个 `10808` 和 bypass 都一模一样 |
+| 单实例 | 通过。第二个实例通过 `QLocalServer` 唤醒第一个后自身退出（日志：`connected to local server, try to raise another program`） |
+| `-tray` 启动 | 通过。窗口不显示、进程常驻、内核照常起、菜单栏项 `available/visible = true` |
+| SIGTERM 退出 | 原本会 `malloc: Double free`（信号上下文里调 Qt），改 self-pipe 后干净退出并正常保存配置 |
+| 托盘图标 | 不再用 256px 彩色插画（18pt 下糊成一团），mac 分支现画模板字形：纸箱 + 猫耳；状态用右下角小圆点表示（模板图没有颜色，只有"有/无"两态） |
+| 翻译 | `qttranslations` 是独立归档，aqt 要单独 `--archives qttranslations`；`build_macos.sh` 会把它拷进 `Contents/Resources/translations`，代码按 `QLibraryInfo::TranslationsPath` → `../Resources/translations` → 可执行文件目录 依次兜底 |
+| TUN | 代码就绪（空 `interface_name` + `strict_route=false`），**尚未点过勾选实机验证** |
+
 **"未编译"是字面意思**：写这份文档的机器是 Windows，没有 Qt/macOS 工具链，
 所有 C++/CMake 改动只做过人工审查。第一次 `cmake` 一定有要修的地方，见 §4。
 
@@ -234,8 +246,23 @@ networksetup -getwebproxy Wi-Fi      # 勾选"系统代理"后应变 Enabled: Ye
 curl -x http://127.0.0.1:2080 https://ip.sb
 ```
 
-取消勾选后必须是 `Enabled: No`。**强杀 App 再重开**也要自动清干净——
-见 `06-macos-port.md` §6.2 的"服务清单落盘 + 启动自愈"。
+取消勾选后必须是 `Enabled: No`。**强杀 App 再重开**也要自动清干净。
+
+**2026-11-20 已实测通过**（用临时钩子直接调 `SetSystemProxy` / 强杀 / 重启，逐项核对）：
+
+| 阶段 | 观察到的状态 |
+|---|---|
+| 基线（用户原本挂着 Karing/Shadowrocket） | `Enabled: No`，但 Server/Port 保留 `127.0.0.1:10808`；bypass = `localhost 127.0.0.0/8 ::1` |
+| 开启系统代理后 | `Enabled: Yes / 127.0.0.1 / 2080`（web + secure + socks），bypass 换成我们那串；`config/system-proxy-state.json` 落盘，里面存的是**上面那份 10808 基线** |
+| `kill -9` 后 | 代理仍是 `Yes / 2080`（就是"看起来断网"的那个状态），清单文件还在 |
+| 重新启动 App | 自动还原成 `No / 10808`，bypass 也回到那三条，清单文件删除 |
+
+关键设计（别退化成"一律关掉"）：**快照存的是每个服务改动前的真实状态**，
+还原时先写回地址端口、再按原来的开/关落状态。用户本来挂着自己的代理时，
+不能因为我们的崩溃把他公司的代理配置清空。
+
+> 注意：`networksetup` 改地址本身会把开关打开，所以顺序必须是「地址 → 开关」，
+> 反了会在中间态短暂生效。
 
 ### Step 6 · TUN（P2，会弹一次密码）
 
@@ -246,8 +273,10 @@ curl https://ip.sb           # 不带 -x，出口 IP 应该变
 ```
 
 排查顺序：`~/Library/Application Support/rekobox/config/sing-box-vpn.json` 里
-`interface_name` 是不是 `utun9`（建议改空）、`route.auto_detect_interface` 是不是 `true`。
-`auto_route` 在 mac 上走 `route add`；`strict_route` / `auto_redirect` 在 mac 无效，别配。
+`interface_name` 应该是**空串**（代码已改成让内核自己挑 `utunN`，写死 `utun9` 会和
+Tailscale / WireGuard 抢名字）、`route.auto_detect_interface` 是 `true`。
+`auto_route` 在 mac 上走 `route add`；`strict_route` / `auto_redirect` 在 mac 无效，
+`genStrictRoute()` 已在 APPLE 分支强制返回 false。
 
 ### Step 7 · 打包分发（P3）
 
@@ -274,6 +303,8 @@ bash RekoboxForWindows/libs/build_macos.sh --dmg
 | 依赖编完，链接时刷几百条 `was built for newer 'macOS' version (15.0) than being linked (13.0)` | `build_deps_macos.sh` 没传部署目标，依赖按本机 15.x 编 | 已在脚本里加 `DEP_FLAGS`（arm64 + 13.0）；改完重跑 `build_deps_macos.sh` 会自动全量重编该依赖 |
 | `No such file or directory (os error 2)`，卡在"放入内核并部署 Qt 运行时" | bundle 里没有 `Contents/Resources`（CMake 只在有资源要装时才建），`cp rekobox.icns` 直接失败；BSD `cp` 的报错不带 `cp:` 前缀，容易误判成别的命令 | `build_macos.sh` 里 cp 图标前加 `mkdir -p "$APP/Contents/Resources"`（已修） |
 | 能启动，但 `codesign -dv` 的 `Identifier` 是 `RekoBox-55554944...` 这种自动 ID，`plutil -p Info.plist` 里 `CFBundleExecutable` / `CFBundleIdentifier` 全是空串 | Info.plist 里的 `@MACOSX_BUNDLE_*@` 隐式变量在 `qt_add_executable(MANUAL_FINALIZATION)` 这条路径上没有被定义 | 改成自己 `configure_file(... @ONLY)`：`CMakeLists.txt` 里设 `NKR_BUNDLE_*`，模板改用 `@NKR_BUNDLE_IDENTIFIER@` 等（已修） |
+| 从终端 `kill` 掉 App 时崩溃日志里出现 `malloc: Double free of object` / `tiny_free_list_remove_ptr: Internal invariant broken` | `signal_handler()` 直接在信号上下文里调 Qt（`on_commitDataRequest()`、`qApp->exit()`）。macOS 的 SIGTERM/SIGINT 可能在 Qt 或 CFRunLoop 内部被投递，重入就破坏堆；**注销/关机时系统发的也是 SIGTERM**，配置可能因此写坏 | 改成 self-pipe：handler 里只 `write()` 一个字节，`QSocketNotifier` 在事件循环线程里再调 `signal_handler(0)`（已修，见 `main/main.cpp` 的 `mac_signal_relay`） |
+| 菜单栏看不见图标 / 想看托盘状态但无从判断 | macOS 15 没给"屏幕录制"权限时，截图里连系统状态项（时钟、Wi-Fi）都会被剔除 | 启动时打印 `[mac] tray available/visible`，终端里跑就能确认；托盘图标在 mac 上走模板图（`Icon::GetTrayQIcon`） |
 
 ### 4.2 可能还会撞上的
 
@@ -351,12 +382,12 @@ RekoboxForMac/                     ← 只放 mac 专属的东西，不放源码
 **P2（下一会话的主线）**
 
 - [x] 把第一次编译跑通，更新 §4 表
-- [ ] 系统代理退出还原 + 服务清单落盘 + 崩溃自愈（`QvProxyConfigurator.cpp`）
-- [ ] TUN 实机验证：`utun` 建起来、路由生效、停掉能恢复
-- [ ] `genTunName()` 在 mac 上返回空（让 sing-box 自动挑 `utunN`），避免撞 Tailscale
-- [ ] 托盘：菜单栏模板图（`QIcon::setIsMask(true)` + 纯黑透明 PNG）
-- [ ] 单实例 + `-tray` 启动 + 关窗不退出 的 mac 行为核对
-- [ ] 翻译路径改用 `QLibraryInfo::TranslationsPath`
+- [x] 系统代理退出还原 + 服务清单落盘 + 崩溃自愈（`QvProxyConfigurator.cpp`）
+- [ ] TUN 实机验证：`utun` 建起来、路由生效、停掉能恢复（代码已就绪，待点一次勾选）
+- [x] `genTunName()` 在 mac 上返回空（让 sing-box 自动挑 `utunN`），避免撞 Tailscale
+- [x] 托盘：菜单栏模板图（`QIcon::setIsMask(true)` + 纯黑透明 PNG）
+- [x] 单实例 + `-tray` 启动 + 关窗不退出 的 mac 行为核对（关窗那一项需人工点一次红点）
+- [x] 翻译路径改用 `QLibraryInfo::TranslationsPath`
 
 **P3**
 

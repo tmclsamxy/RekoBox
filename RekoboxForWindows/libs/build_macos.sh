@@ -137,6 +137,17 @@ if [ -f "$ROOT/res/rekobox.icns" ]; then
 fi
 "$QT_PREFIX/bin/macdeployqt" "$APP" -always-overwrite
 
+# Qt 自带翻译（qtbase_*.qm）：macdeployqt 不拷，代码从
+# Contents/Resources/translations 里找。没有 qtbase 归档就跳过，界面仍是中文源串。
+QT_TR_SRC="$QT_PREFIX/translations"
+if [ -d "$QT_TR_SRC" ]; then
+    mkdir -p "$APP/Contents/Resources/translations"
+    cp "$QT_TR_SRC"/qtbase_*.qm "$APP/Contents/Resources/translations/" 2>/dev/null || true
+    echo "Qt 翻译: $(ls "$APP/Contents/Resources/translations" | wc -l | tr -d ' ') 个"
+else
+    echo "跳过 Qt 翻译：$QT_TR_SRC 不存在（aqt 需 --archives qttranslations）"
+fi
+
 # ---------------------------------------------------------------- 6. 签名（ad-hoc）
 step "ad-hoc 签名"
 codesign --force --sign - "$APP/Contents/MacOS/rekobox_core"

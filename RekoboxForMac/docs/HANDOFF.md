@@ -108,7 +108,8 @@ mkdir -p ~/Rekobox && cd ~/Rekobox && unzip ~/Downloads/Rekobox-mac-dev.zip
 | SIGTERM 退出 | 原本会 `malloc: Double free`（信号上下文里调 Qt），改 self-pipe 后干净退出并正常保存配置 |
 | 托盘图标 | 不再用 256px 彩色插画（18pt 下糊成一团），mac 分支现画模板字形：纸箱 + 猫耳；状态用右下角小圆点表示（模板图没有颜色，只有"有/无"两态） |
 | 翻译 | `qttranslations` 是独立归档，aqt 要单独 `--archives qttranslations`；`build_macos.sh` 会把它拷进 `Contents/Resources/translations`，代码按 `QLibraryInfo::TranslationsPath` → `../Resources/translations` → 可执行文件目录 依次兜底 |
-| TUN | 代码就绪（空 `interface_name` + `strict_route=false`），**尚未点过勾选实机验证** |
+| TUN | **已实机通过**：建出 `utun4`（172.19.0.1/28）、72 条路由指向 utun、绕过系统代理直连 `api.ipify.org` 出口变节点 IP、`curl https://1.1.1.1` 正常；取消后 utun4 消失、路由清零、root 内核退出、无 `172.19` 残留 |
+| TUN 的 DNS | **未接管**（见 §4.1 最后一行）：域名仍由路由器解析，能正常上网，但被污染域名解析不到、查询明文给运营商。要修得在 tun 内核另起 127.0.0.1:53 监听 + 固定上游 DNS |
 
 **"未编译"是字面意思**：写这份文档的机器是 Windows，没有 Qt/macOS 工具链，
 所有 C++/CMake 改动只做过人工审查。第一次 `cmake` 一定有要修的地方，见 §4。
@@ -309,6 +310,9 @@ bash RekoboxForWindows/libs/build_macos.sh --dmg
 | 勾选后弹窗报 `configure tun interface: Connect: operation not permitted` | 配置里 `vpn_internal_tun = true`（"Internal Tun"，主内核自己加 tun 入站），它要求**进程本身是 root**；mac 上永远不是 | mac 启动时强制 `vpn_internal_tun = false`（走两进程模型），设置页里把"Internal Tun"隐藏（已修） |
 | TUN 起来后整机不可用、日志刷屏 `open connection ... context deadline exceeded`，日志里出现源地址 `172.19.0.1` | 回环：tun 把整机流量劫走后，**主内核连节点的那条 TCP 也被抓进去**，进了 socks 又回到主内核。`auto_detect_interface` 只保护 tun 内核自己的 socket，管不到另一个进程 | TUN 配置生成时写 `route_exclude_address`：节点地址 + 局域网段（`db/ConfigBuilder.cpp` 的 `buildTunRouteExclude`）。注意 `process_name` 规则在 mac 上是空转的——这一版 sing-tun 在 darwin 不提供 `ProcessInfo`（已修） |
 | TUN 能起，但一有 UDP（QUIC/DNS）主内核就 `panic: buffer overflow: capacity 16384,start 0, need 10`，内核反复重启直到"退出太频繁" | sing v0.7.18 的 `bufio.copyPacketWaitWithPool`（ReadWaiter 快路径）把 waiter 交回的 buffer 直接写出去，**没按 destination 预留头部空间**；SOCKS5 UDP 回程要 10 字节头，`ExtendHeader` 直接 panic。mac 两进程模型必经这一跳（Windows 单进程没有） | 新包 `go/singbox-neko-headroom/`（`//go:build darwin`）+ 补丁 `go/patches/route-conn-headroom.patch` 改 `sing-box/route/conn.go`，写前保证 ≥32 字节头部空位；`apply_neko_patch.sh` 幂等应用，`build_macos.sh` 每次构建都会跑（已修，本地两内核串联可复现/验证） |
+| 退出时必崩：崩溃报告 `aboutToQuit → QProcess::waitForFinished → ~QSocketNotifier`，SIGSEGV | `aboutToQuit` 里调 `waitForFinished()` 会跑嵌套事件循环，`QProcess` 通道的 notifier 在析构阶段踩空 | 只 `kill()` 不 wait：SIGKILL 一样立即释放端口（已修） |
+| 崩过一次之后，**再点图标就再也起不来**（无窗口、无报错、进程秒退） | `RunGuard` 用 `QSharedMemory`，进程被信号杀死时共享内存段不会释放；下次启动判定"已有实例"，去唤醒本地 socket 又连不上，于是 `return 0` 静默退出 | mac 改用固定名字的 `QLocalServer`（`rekoboxlocalserver-lock`）加锁：残留套接字文件可安全清掉，第二个实例连上来时抬起已有窗口（已修，`kill -9` 后可直接再启动） |
+| 想接管系统 DNS：把 DNS 指到 tun 地址后**整机解析全挂**，`dig @172.19.0.1` 超时 | ① `172.19.0.1` 是 utun **自己的**地址，内核本地投递、包根本不进 utun；同网段的 `172.19.0.2` 也不应答；② sing-box 的 `dns-direct` 走"系统 DNS"，改完变成**自己查自己**（`lsof -i:53` 能看到 `rekobox_c` 在往 `172.19.0.1:53` 发查询） | **放弃该方案**（代码保留但不再启用，只做残留清理）。真要接管 DNS，得在 tun 内核里另起 `127.0.0.1:53` 监听（`direct` 入站 + `override_address` + 路由到 `dns-out`），并把 `core_box_underlying_dns` 固定成真实上游，不能留 `local` |
 
 ### 4.2 可能还会撞上的
 
@@ -387,7 +391,7 @@ RekoboxForMac/                     ← 只放 mac 专属的东西，不放源码
 
 - [x] 把第一次编译跑通，更新 §4 表
 - [x] 系统代理退出还原 + 服务清单落盘 + 崩溃自愈（`QvProxyConfigurator.cpp`）
-- [ ] TUN 实机验证：`utun` 建起来、路由生效、停掉能恢复（代码已就绪，待点一次勾选）
+- [x] TUN 实机验证：`utun` 建起来、路由生效、停掉能恢复（出口 IP 已确认走节点，取消后路由清零）
 - [x] `genTunName()` 在 mac 上返回空（让 sing-box 自动挑 `utunN`），避免撞 Tailscale
 - [x] 托盘：菜单栏模板图（`QIcon::setIsMask(true)` + 纯黑透明 PNG）
 - [x] 单实例 + `-tray` 启动 + 关窗不退出 的 mac 行为核对（关窗那一项需人工点一次红点）

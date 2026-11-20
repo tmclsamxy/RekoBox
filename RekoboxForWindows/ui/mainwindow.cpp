@@ -1879,13 +1879,10 @@ bool MainWindow::StartVPNProcess() {
     vpn_process->waitForStarted();
     vpn_pid = vpn_process->processId(); // actually it's pkexec or bash PID
 
-#ifdef Q_OS_MACOS
-    // tun 起来后接管系统 DNS（sing-tun 在 darwin 上不给 utun 下发 DNS）。
-    // 延迟一点：utun 还没建好就把 DNS 指过去，中间会有一两秒解析失败。
-    QTimer::singleShot(1200, this, [this] {
-        if (vpn_pid != 0) NekoGui_mac::ApplyTunDNS(true);
-    });
-#endif
+    // 注：曾尝试在 TUN 起来后把系统 DNS 改到 tun 地址（172.19.0.1）来接管解析，
+    // 实测不可行——172.19.0.1 是 utun 自己的地址，内核本地投递、包根本不进 utun；
+    // 而且 sing-box 的 dns-direct 用"系统 DNS"，改完会变成自己查自己（死循环）。
+    // 结论写进 HANDOFF §4.1，真要接管得另起一个 127.0.0.1:53 监听并固定上游 DNS。
 #endif
     return true;
 }
@@ -1895,8 +1892,8 @@ bool MainWindow::StopVPNProcess(bool unconditional) {
         bool ok;
         core_process->processId();
 #ifdef Q_OS_MACOS
-        // 先把 DNS 还原，再杀 tun 内核。反过来会有一小段"DNS 指向已经消失的网卡"，
-        // 那段时间整个系统解析不了域名
+        // DNS 接管方案已废弃（见 StartVPNProcess 里的注释），这里只做残留清理：
+        // 旧版本留下的 tun-dns-state.json 会被还原并删除，没有文件时是空操作
         NekoGui_mac::ApplyTunDNS(false);
 #endif
 #ifdef Q_OS_WIN

@@ -146,6 +146,7 @@ set(PROJECT_SOURCES
         main/NekoGui.cpp
         main/NekoGui_Utils.cpp
         main/HTTPRequestHelper.cpp
+        main/AppLog.cpp
 
         3rdparty/base64.cpp
         3rdparty/qrcodegen.cpp
@@ -330,6 +331,17 @@ if (APPLE)
             MACOSX_BUNDLE_SHORT_VERSION_STRING "${NKR_RC_VERSION}"
             MACOSX_BUNDLE_INFO_PLIST "${NKR_BUNDLE_PLIST}"
     )
+
+    # 崩溃定位支持（P0-2）：Ninja 生成器**不会**自动产 dSYM（只有 Xcode 生成器会），
+    # 所以这里链接完手动跑一次 dsymutil。崩溃报告里的地址靠它才能符号化成函数名，
+    # 否则那些 QThreadData 相关的 SIGBUS 全是 ??:0，根本没法定位。
+    # 放在这里而不是 macos.cmake：那个文件在 target 创建之前就被 include 了。
+    if (NKR_MACOS_ENABLE_DSYM)
+        add_custom_command(TARGET rekobox POST_BUILD
+                COMMAND dsymutil "$<TARGET_FILE:rekobox>" -o "$<TARGET_FILE:rekobox>.dSYM"
+                COMMENT "[mac] generating dSYM for crash symbolication"
+                VERBATIM)
+    endif ()
 endif ()
 
 # Target Source Translations

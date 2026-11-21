@@ -842,6 +842,17 @@ namespace NekoGui {
         auto match_out = dataStore->vpn_rule_white ? "neko-socks" : "direct";
         auto no_match_out = dataStore->vpn_rule_white ? "direct" : "neko-socks";
 
+        #ifdef Q_OS_MACOS
+        // P1-9：这一版 sing-tun 在 darwin 不提供 ProcessInfo，process_name 规则
+        // 既不报错也不生效。与其把用户的输入静默拼进一个永远不会匹配的规则
+        // （排障时极易误判成"我明明配了"），不如不生成，并在日志里说清楚。
+        QString process_name_rule;
+        if (!dataStore->vpn_rule_process.trimmed().isEmpty()) {
+            qInfo() << "[mac] process-name split routing is not supported on darwin "
+                       "(sing-tun provides no ProcessInfo here); the rule is skipped. "
+                       "Use Bypass CIDR instead.";
+        }
+#else
         QString process_name_rule = dataStore->vpn_rule_process.trimmed();
         if (!process_name_rule.isEmpty()) {
             auto arr = SplitLinesSkipSharp(process_name_rule);
@@ -849,6 +860,7 @@ namespace NekoGui {
                              {"process_name", QList2QJsonArray(arr)}};
             process_name_rule = "," + QJsonObject2QString(rule, false);
         }
+#endif
 
         QString cidr_rule = dataStore->vpn_rule_cidr.trimmed();
         if (!cidr_rule.isEmpty()) {
@@ -872,6 +884,33 @@ namespace NekoGui {
 
         // 节点地址不进 tun 路由，否则主内核连节点会被 tun 再抓一次形成回环
         auto excludeList = buildTunRouteExclude(serverAddress);
+#ifdef Q_OS_MACOS
+        // dns-direct 的上游也要挖出 tun。
+        //
+        // 那个上游是给 tun 内核的 direct 出站用的：它由**主内核**替 tun 内核去连
+        // （直连出站是 socks 里的另一条路），而主内核的 socket 不受 tun 保护，
+        // 不排除的话这条查询又被 tun 抓回来 → 进 dns-out → dns-direct → 循环。
+        // 原代码只硬编码排除了 8.8.8.8，但上游现在是从系统 DNS 探测出来的
+        // （可能是 192.168.x.1、公司内网 DNS、223.5.5.5……），必须动态加。
+        {
+            const auto upstream = NekoGui_mac::TunDNSUpstream();
+            QHostAddress addr(upstream);
+            if (!addr.isNull()) {
+                const auto cidr = addr.protocol() == QAbstractSocket::IPv6Protocol
+                                          ? addr.toString() + "/128"
+                                          : addr.toString() + "/32";
+                if (!excludeList.contains(cidr)) excludeList << cidr;
+            } else if (!upstream.isEmpty()) {
+                // 上游是域名（罕见，但 networksetup 允许）：逐个解析
+                for (const auto &a: QHostInfo::fromName(upstream).addresses()) {
+                    const auto cidr = a.protocol() == QAbstractSocket::IPv6Protocol
+                                              ? a.toString() + "/128"
+                                              : a.toString() + "/32";
+                    if (!excludeList.contains(cidr)) excludeList << cidr;
+                }
+            }
+        }
+#endif
         QStringList quoted;
         for (const auto &cidr: excludeList) quoted << QStringLiteral("\"%1\"").arg(cidr);
         auto route_exclude = QStringLiteral(R"("route_exclude_address": [%1],)").arg(quoted.join(", "));
@@ -886,8 +925,45 @@ namespace NekoGui {
         //      否则变成自己查自己。所以这里显式给一个真实上游。
         QString dns_node_rule;
         QString underlying_dns = BOX_UNDERLYING_DNS;
+        QString dns_inbound;
+        QString dns_inbound_rule;
 #ifdef Q_OS_MACOS
         underlying_dns = NekoGui_mac::TunDNSUpstream();
+
+        // ------------------------------------------------------------------
+        // P1-8：真正接管系统 DNS
+        //
+        // 原来只把系统 DNS 改成 172.19.0.2，指望它"落在 tun 网段所以会进隧道"。
+        // 实测不成立：utun 上并没有服务监听 172.19.0.2:53，内核把发往同网段地址的包
+        // 直接投递给接口（当作直连邻居），根本走不到那条 "port 53 → dns-out" 规则，
+        // 于是探活恒失败、系统 DNS 从来没被真正接管 → DNS 泄漏 + 污染域名解析不到。
+        //
+        // 现在走 sing-box 官方推荐的 macOS 做法：**tun 内核自己监听 127.0.0.1:53**。
+        // tun 内核是 root（由 osascript 提权启动），所以能绑 53 这种特权端口
+        // （非 root 绑 127.0.0.1:53 实测 EPERM）。
+        //   direct 入站 + override_address/override_port → 把收到的查询改成发往
+        //   目标上游（dns-direct 的真实上游），再由路由规则交给 dns-out 解析。
+        //
+        // 这条路和 Android 的 addDnsServer 语义等价：系统 DNS 指向一个**本机监听的
+        // 服务**，解析一定经过隧道，不再依赖"同网段地址会不会被路由劫持"这种脆弱假设。
+        // ------------------------------------------------------------------
+        dns_inbound = QStringLiteral(R"(,
+        {
+            "type": "direct",
+            "tag": "dns-in",
+            "listen": "127.0.0.1",
+            "listen_port": 53,
+            "override_address": "%1",
+            "override_port": 53,
+            "network": "udp"
+        })").arg(underlying_dns);
+
+        // 入站自身的查询要显式送去 dns-out（否则会落到 final 走代理，多绕一圈）
+        dns_inbound_rule = QStringLiteral(R"(,
+            {
+                "inbound": ["dns-in"],
+                "outbound": "dns-out"
+            })");
 
         // 域名节点 + 接管 DNS 会打结：主内核要解析节点域名 → 问 127.0.0.1 →
         // tun 内核 → dns-remote → 走 socks 回到主内核 → 主内核又要解析节点域名。
@@ -905,6 +981,8 @@ namespace NekoGui {
                           .replace("//%SOCKS_USER_PASS%", socks_user_pass)
                           .replace("//%PROCESS_NAME_RULE%", process_name_rule)
                           .replace("//%CIDR_RULE%", cidr_rule)
+                          .replace("//%DNS_INBOUND_RULE%", dns_inbound_rule)
+                          .replace("//%DNS_INBOUND%", dns_inbound)
                           .replace("%MTU%", Int2String(dataStore->vpn_mtu))
                           .replace("%STACK%", Preset::SingBox::VpnImplementation.value(dataStore->vpn_implementation))
                           .replace("%TUN_NAME%", genTunName())

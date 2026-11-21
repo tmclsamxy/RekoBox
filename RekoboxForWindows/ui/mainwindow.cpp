@@ -37,6 +37,7 @@
 #endif
 #ifdef Q_OS_MACOS
 #include "sys/macos/MacPlatform.hpp"
+#include "sys/macos/Gui.hpp"
 #endif
 #include <unistd.h>
 #endif
@@ -236,7 +237,20 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
     // Setup Tray
     tray = new QSystemTrayIcon(this); // 初始化托盘对象tray
     tray->setIcon(Icon::GetTrayQIcon(Icon::NONE));
+#ifdef Q_OS_MACOS
+    // macOS 用**原生**菜单栏：QMenuBar 会变成 NSMenu，而 Qt 会把挂在菜单栏上的
+    // QMenu 的 platform menu 绑到 NSMenu 上。此时同一个 QMenu 再拿来当托盘右键菜单
+    // （setContextMenu + popup），典型结果是托盘菜单空白 / 菜单栏那一项消失 /
+    // 工具栏下拉弹不出来——三处共用一个 QMenu 在 mac 上必然打架。
+    //
+    // 所以 mac 上给托盘单建一个 QMenu：QAction 可以共享（同一个 action 绑多个菜单
+    // 是合法的，信号只连一次），但 QMenu 本身必须是独立对象。
+    // 内容也按 mac 习惯精简：完整功能在菜单栏里已经有了，托盘只留高频几项。
+    tray_menu = new QMenu(this);
+    tray->setContextMenu(tray_menu);
+#else
     tray->setContextMenu(ui->menu_program); // 创建托盘菜单
+#endif
     tray->show();                           // 让托盘图标显示在系统托盘上
 #ifdef Q_OS_MACOS
     // 菜单栏项是 mac 上最容易"静默失败"的一环（图标不显示、点了没反应都不报错），
@@ -294,6 +308,77 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
             ui->menuActive_Routing->addAction(a);
         }
     });
+    #ifdef Q_OS_MACOS
+    // 托盘菜单：只放高频几项，完整菜单在菜单栏里。
+    // QAction 是共享的（同一个 action 挂到多个菜单是 Qt 支持的用法，信号也只连一次），
+    // 但 QMenu 必须是独立对象——这正是这条 bug 的根因。
+    tray_menu->addAction(ui->actionShow_window);
+    tray_menu->addSeparator();
+    // 系统代理/路由这类子菜单也必须是新 QMenu：直接把 ui->menu_spmode 塞进来
+    // 就又会和菜单栏抢同一个 platform menu。
+    auto tray_spmode = tray_menu->addMenu(tr("系统代理"));
+    tray_spmode->addAction(ui->menu_spmode_system_proxy);
+    tray_spmode->addAction(ui->menu_spmode_vpn);
+    tray_spmode->addAction(ui->menu_spmode_disabled);
+    auto tray_server = tray_menu->addMenu(tr("当前服务器"));
+    tray_menu->addSeparator();
+    tray_menu->addAction(ui->actionRestart_Proxy);
+    tray_menu->addAction(ui->menu_exit);
+
+    // 勾选状态每次弹出前同步一次（与 menu_program 的 aboutToShow 同一份逻辑，
+    // 不能共用同一个 QMenu 的 aboutToShow，所以这里单独接一个）
+    connect(tray_menu, &QMenu::aboutToShow, this, [=]() {
+        ui->menu_spmode_disabled->setChecked(!(NekoGui::dataStore->spmode_system_proxy || NekoGui::dataStore->spmode_vpn));
+        ui->menu_spmode_system_proxy->setChecked(NekoGui::dataStore->spmode_system_proxy);
+        ui->menu_spmode_vpn->setChecked(NekoGui::dataStore->spmode_vpn);
+
+        // 当前服务器列表：与菜单栏不同，这里只列前 20 个，避免托盘菜单撑满屏幕
+        for (const auto &old: tray_server->actions()) {
+            tray_server->removeAction(old);
+            delete old; // 这些是托盘专用的临时 action，不共享
+        }
+        int count = 0;
+        for (const auto &pf: NekoGui::profileManager->CurrentGroup()->ProfilesWithOrder()) {
+            auto a = new QAction(pf->bean->DisplayTypeAndName(), this);
+            a->setProperty("id", pf->id);
+            a->setCheckable(true);
+            if (NekoGui::dataStore->started_id == pf->id) a->setChecked(true);
+            connect(a, &QAction::triggered, this, [=] {
+                auto id = a->property("id").toInt();
+                if (NekoGui::dataStore->started_id == id) {
+                    neko_stop();
+                } else {
+                    neko_start(id);
+                }
+            });
+            tray_server->addAction(a);
+            if (++count == 20) {
+                // 这里**不能** setMenu(ui->menuActive_Server)：那等于把菜单栏里的
+                // QMenu 再借给托盘，正好是本条 bug 本身（一个 QMenu 被 NSMenu 绑过
+                // 之后不能再当 popup 用）。要"更多"就把窗口打开，让用户用完整菜单。
+                tray_server->addSeparator();
+                auto more = tray_server->addAction(tr("More…"));
+                connect(more, &QAction::triggered, this, [=] { ActivateWindow(this); });
+                break;
+            }
+        }
+        if (count == 0) {
+            auto a = tray_server->addAction(tr("(no profiles)"));
+            a->setEnabled(false);
+        }
+    });
+
+    // 自检日志：托盘菜单在 mac 上"空白"是这条 bug 的典型表现，而没有屏幕录制权限时
+    // 截图看不到菜单栏，所以把结构打进日志——出问题时看日志就能判断菜单是否建起来了。
+    connect(tray, &QSystemTrayIcon::activated, this, [=](QSystemTrayIcon::ActivationReason reason) {
+        if (reason != QSystemTrayIcon::Context) return;
+        qDebug() << "[mac] tray context menu opened, top-level items:"
+                 << tray_menu->actions().size()
+                 << "targets a separate QMenu =" << (tray_menu != ui->menu_program)
+                 << "menu_program still parented to menubar ="
+                 << (ui->menu_program->parentWidget() == ui->menubar);
+    });
+#endif
     connect(ui->menuActive_Server, &QMenu::triggered, this, [=](QAction *a) {
         bool ok;
         auto id = a->property("id").toInt(&ok);
@@ -327,7 +412,34 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
         NekoGui::dataStore->Save();
     });
     connect(ui->actionStart_with_system, &QAction::triggered, this, [=](bool checked) {
-        AutoRun_SetEnabled(checked);
+        // macOS 上这个勾选框有两个容易踩的坑，都在这里显式处理，
+        // 别让用户看到"勾了又跳回去"却没人解释：
+        //   1) App 不在 /Applications → SMAppService 恒返回 NotFound，注册不可能成功
+        //   2) 注册成功但需用户在「系统设置 → 通用 → 登录项」批准 → 状态是 RequiresApproval
+        if (!AutoRun_SetEnabled(checked)) {
+            // 复位勾选框：菜单的 aboutToShow 里会用真实状态覆盖，但菜单此时已经关掉了，
+            // 不手动复位的话界面会一直显示"已开启"直到下次打开菜单。
+            ui->actionStart_with_system->setChecked(AutoRun_IsEnabled());
+#ifdef Q_OS_MACOS
+            MessageBoxWarning(
+                software_name,
+                tr("Could not change the \"Start at login\" setting.\n\n"
+                   "On macOS this requires RekoBox to be in the Applications folder:\n"
+                   "drag RekoBox.app to /Applications, launch it from there, then try again."));
+#endif
+            return;
+        }
+#ifdef Q_OS_MACOS
+        if (checked && AutoRun_Status() == 2) {
+            QMessageBox::information(
+                GetMessageBoxParent(), software_name,
+                tr("One more step needed.\n\n"
+                   "RekoBox has been added to login items, but macOS needs your approval:\n"
+                   "System Settings → General → Login Items → allow RekoBox.\n\n"
+                   "Also note: login items cannot pass command-line arguments, so RekoBox "
+                   "will start hidden in the menu bar (same as the Windows \"-tray\" behaviour)."));
+        }
+#endif
     });
     connect(ui->actionAllow_LAN, &QAction::triggered, this, [=](bool checked) {
         NekoGui::dataStore->inbound_address = checked ? "::" : "127.0.0.1";
@@ -411,18 +523,21 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
     if (NekoGui::dataStore->flag_debug) args.push_back("-debug");
 
     // Start core
-    runOnUiThread(
-        [=] {
-            core_process = new NekoGui_sys::CoreProcess(core_path, args);
-            // Remember last started
-            if (NekoGui::dataStore->remember_enable && NekoGui::dataStore->remember_id >= 0) {
-                core_process->start_profile_when_core_is_up = NekoGui::dataStore->remember_id;
-            }
-            // Setup
-            core_process->Start();
-            setup_grpc();
-        },
-        DS_cores);
+    // 注意：原来这里传了 DS_cores，注释写的却是 "main thread"——实际回调跑在 cores
+    // 线程上，core_process（QProcess）就在那个线程被创建并 start()，而 UI 线程的
+    // processId()/state()/kill()/Restart() 全部跨线程直接调用该 QProcess 的内部状态。
+    // QProcess 的通道 notifier 在两边同时被碰就是 2026-11-20 那批
+    // `~QObject` / `~ConnectionData` 重复释放崩溃的典型成因（P0-2）。
+    // 内核进程走 QProcess 自己的线程即可，创建句柄留在 UI 线程，所有成员访问
+    // （processId/state/kill）都在同一个线程，才谈得上线程安全。
+    core_process = new NekoGui_sys::CoreProcess(core_path, args);
+    // Remember last started
+    if (NekoGui::dataStore->remember_enable && NekoGui::dataStore->remember_id >= 0) {
+        core_process->start_profile_when_core_is_up = NekoGui::dataStore->remember_id;
+    }
+    // Setup
+    core_process->Start();
+    setup_grpc();
 
     // Remember system proxy
     if (NekoGui::dataStore->remember_enable || NekoGui::dataStore->flag_restart_tun_on) {
@@ -455,6 +570,42 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
     // 云端同步：登录状态下启动 3 秒后拉一次，之后本地改动自动推送
     NekoGui_sync::SyncEngine::instance()->init();
 
+#ifdef Q_OS_MACOS
+    // 托盘模式下把 Dock 图标也收掉，否则会同时有"菜单栏图标 + Dock 图标 + Cmd+Tab 项"，
+    // 而 Windows 上 -tray 是纯托盘（无任务栏按钮）。这个差异只能运行时改
+    // ActivationPolicy 做到（Info.plist 的 LSUIElement 是编译期固定的，
+    // 改了就没法再切回普通窗口模式）。
+    if (NekoGui::dataStore->flag_tray) {
+        NekoGui_mac::SetDockIconVisible(false);
+    }
+
+    // P2-16：App Nap 抑制。
+    // 代理软件"挂后台"是常态，而窗口不可见一段时间后系统会合并/节流定时器，
+    // TrafficLooper 靠 msleep 轮询，最先中招——表现就是"挂久了流量统计不跳"。
+    // 用 NSActivityUserInitiatedAllowingIdleSystemSleep：只挡 App Nap，不挡系统睡眠
+    // （笔记本上阻止休眠很扰人，不该由代理软件决定）。
+    NekoGui_mac::SetAppNapInhibited(true);
+
+    // P2-16：睡眠唤醒 / 网络变化。
+    //   唤醒后 utun 与路由可能已被系统拆掉，界面仍显示"TUN 已开启"但实际不通；
+    //   换 Wi-Fi / 插网线后 route_exclude_address 里的节点 IP 可能来自旧 DNS。
+    // 两者都只提示 + 让用户一键重启代理，不自动重连：自动重连会在
+    // "用户刻意断开"的情况下造成"自己又连上了"的困惑。
+    NekoGui_mac::SetPowerEventCallbacks(
+            [] {
+                qInfo() << "[mac] system woke up";
+                runOnUiThread([] {
+                    MW_show_log("[mac] 系统已唤醒。若无法上网，请重启代理（TUN 的 utun 与路由可能已被系统回收）。");
+                });
+            },
+            [] {
+                qInfo() << "[mac] network configuration changed";
+                runOnUiThread([] {
+                    MW_show_log("[mac] 网络已切换。若节点连不上，请重启代理（节点地址可能已变）。");
+                });
+            });
+#endif
+
     if (!NekoGui::dataStore->flag_tray) show();
 
     // 兜底：任何退出路径（包括直接 qApp->quit()）都要确保内核进程结束，
@@ -480,9 +631,29 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
 void MainWindow::closeEvent(QCloseEvent *event) {
     if (tray->isVisible()) {
         hide();          // 隐藏窗口
+#ifdef Q_OS_MACOS
+        // 托盘模式下窗口收起来就恢复"纯菜单栏"，Dock 图标跟着消失——
+        // 与 Windows 上 -tray 的"关掉窗口只剩托盘"一致。
+        if (NekoGui::dataStore->flag_tray) {
+            NekoGui_mac::SetDockIconVisible(false);
+        }
+#endif
         event->ignore(); // 忽略事件
     }
 }
+
+#ifdef Q_OS_MACOS
+void MainWindow::showEvent(QShowEvent *event) {
+    QMainWindow::showEvent(event);
+
+    // 托盘模式启动时是 Accessory（无 Dock 图标）。窗口一露头就要切回 Regular：
+    // Accessory 应用的窗口不参与正常的窗口层次，用户会觉得"窗口跑到别的 App 后面去了"。
+    // 系统对"已经是 Regular"再设一次是幂等的，所以这里不必自己记状态。
+    if (NekoGui::dataStore->flag_tray) {
+        NekoGui_mac::SetDockIconVisible(true);
+    }
+}
+#endif
 
 MainWindow::~MainWindow() {
     delete ui;
@@ -700,7 +871,10 @@ void MainWindow::on_menu_exit_triggered() {
         NekoGui::dataStore->prepare_exit = true;
         //
         neko_set_spmode_system_proxy(false, false);
-        neko_set_spmode_vpn(false, false);
+        // sync=true：退出链路必须同步把 TUN 停干净，紧接着要读 spmode_vpn 判断
+        // 能不能继续退出（异步的话 spmode_vpn 还是 true，会被误判成"没停掉"）。
+        // 停不掉时的兜底在 neko_set_spmode_vpn 的 sync 分支里：告警但不阻塞退出。
+        neko_set_spmode_vpn(false, false, true);
         if (NekoGui::dataStore->spmode_vpn) {
             mu_exit.unlock(); // retry
             return;
@@ -731,14 +905,30 @@ void MainWindow::on_menu_exit_triggered() {
 
     // 兜底：无论 gRPC Exit 是否成功，退出前直接结束内核进程。
     // prepare_exit 已置位，CoreProcess 不会把它再拉起来。
+    //
+    // 这里**只能 kill，不能 waitForFinished**：本函数末尾就是 QCoreApplication::quit()，
+    // waitForFinished 会在退出链路上跑嵌套事件循环，QProcess 通道的 QSocketNotifier
+    // 在 quit 之后析构踩空 → SIGSEGV（2026-11-20 崩溃报告：
+    // aboutToQuit → waitForFinished → QProcessPrivate::closeChannel → ~QSocketNotifier）。
+    // 原先是 kill 之后再等 3 秒，等于把同一处崩溃往前挪了一步。kill 是 SIGKILL，
+    // 进程立刻消失、端口立刻释放，不需要等。
     NekoGui::dataStore->prepare_exit = true;
     if (core_process != nullptr && core_process->state() != QProcess::NotRunning) {
         core_process->kill();
-        core_process->waitForFinished(3000);
     }
+    // exit_reason == 1 是"更新完要重启"（Windows：updater.exe；Linux：launcher 软链）。
+    // mac 上**故意没有** updater（main.cpp:112 不建软链，build_macos.sh 还会 rm -f），
+    // 原来这里 startDetached("./updater") 必然失败且不报错，用户看到的是"更新完 App 直接消失"。
+    // mac 的更新流程是「打开 dmg → 用户自己拖进 Applications → 再手动启动」，
+    // 所以这条分支在 mac 上什么都不做，仅记录日志。
     if (exit_reason == 1) {
+#ifdef Q_OS_MACOS
+        qDebug() << "[mac] exit_reason=1 (post-update restart): no updater on macOS, "
+                    "the dmg installer handles the relaunch";
+#else
         QDir::setCurrent(QApplication::applicationDirPath());
         QProcess::startDetached("./updater", QStringList{});
+#endif
     } else if (exit_reason == 2 || exit_reason == 3) {
         QDir::setCurrent(QApplication::applicationDirPath());
 
@@ -796,7 +986,24 @@ void MainWindow::neko_set_spmode_system_proxy(bool enable, bool save) {
     refresh_status();
 }
 
-void MainWindow::neko_set_spmode_vpn(bool enable, bool save) {
+void MainWindow::neko_set_spmode_vpn(bool enable, bool save, bool sync) {
+    // 收尾：把新状态落到 dataStore 并刷界面。异步分支拿到结果后也走这里，
+    // 保证"保存 remember_spmode / 刷新勾选状态"只有一份实现。
+    auto apply_state = [=](bool state) {
+        if (save) {
+            NekoGui::dataStore->remember_spmode.removeAll("vpn");
+            if (state && NekoGui::dataStore->remember_enable) {
+                NekoGui::dataStore->remember_spmode.append("vpn");
+            }
+            NekoGui::dataStore->Save();
+        }
+
+        NekoGui::dataStore->spmode_vpn = state;
+        refresh_status();
+
+        if (NekoGui::dataStore->vpn_internal_tun && NekoGui::dataStore->started_id >= 0) neko_start(NekoGui::dataStore->started_id);
+    };
+
     if (enable != NekoGui::dataStore->spmode_vpn) {
         if (enable) {
             if (NekoGui::dataStore->vpn_internal_tun) {
@@ -846,26 +1053,65 @@ void MainWindow::neko_set_spmode_vpn(bool enable, bool save) {
         } else {
             if (NekoGui::dataStore->vpn_internal_tun) {
                 // current core is sing-box
-            } else {
-                if (!StopVPNProcess()) {
+            } else if (!sync) {
+                // 内核已经自己退了（崩溃 / 被外部杀掉），没有要停的东西，直接落状态
+                if (vpn_pid == 0) {
+                    apply_state(false);
+                    return;
+                }
+
+                // 用户主动取消勾选：走异步，UI 线程不能等（原来无参 waitForFinished =
+                // 30 秒，密码框弹着的时候整窗口假死；用户点"取消"后 utun 与 72 条路由
+                // 仍留着，界面却显示已关 → 整机断网）。
+                if (vpn_stopping) {
+                    MessageBoxWarning(software_name, tr("Tun is still shutting down, please wait."));
                     neko_set_spmode_FAILED
                 }
+
+                vpn_stopping = true;
+                MW_show_log(">>>>>>>> " + tr("Stopping Tun process…"));
+
+                // 这里 keep spmode_vpn = true，直到真正停成功。中途失败也必须保持 true，
+                // 否则就是"谎报已关闭"。refresh_status() 会把勾选框重新勾上。
+                refresh_status();
+                StopVPNProcessAsync(false, [=](bool ok) {
+                    vpn_stopping = false;
+                    if (!ok) {
+                        MW_show_log("<<<<<<<< " + tr("Failed to stop Tun process"));
+                        MessageBoxWarning(
+                            tr("Error"),
+                            tr("Failed to stop the Tun process — Tun is still running.\n\n"
+                               "Common causes:\n"
+                               "• The administrator password prompt was cancelled.\n"
+                               "• The kernel did not exit in time.\n\n"
+                               "Tun stays enabled so you are not left with a half-broken network.\n"
+                               "Try again, or use \"VPN Settings → Troubleshooting → Reset\"."));
+                        refresh_status(); // 勾选框回到"已开启"，与实际状态一致
+                        return;
+                    }
+                    MW_show_log("<<<<<<<< " + tr("Tun stopped"));
+                    apply_state(false);
+                });
+                return;
+            } else {
+                // 退出链路：必须同步拿到结果，紧接着要读 spmode_vpn 决定能否继续退出。
+                // 与用户主动取消不同——这里**停不掉也要把状态落成 false 并继续退出**：
+                // 原来失败会走 neko_set_spmode_FAILED → spmode_vpn 仍为 true → 上层
+                // "retry" 解锁后再无第二次触发，程序永远关不掉，而 utun 与 72 条路由
+                // 还留在系统里（用户看到"点退出没反应 + 整机断网"）。
+                // 停不掉是"已知且可恢复"的（下次启动 RecoverTunDNSIfNeeded 会救回来），
+                // 关不掉才是死局。所以这里只告警，不阻塞。
+                if (vpn_pid != 0 && !StopVPNProcess()) {
+                    MW_show_log("[Error] " + tr("Failed to stop Tun process, continuing shutdown anyway. "
+                                                "If the network stays broken after quitting, run "
+                                                "\"VPN Settings → Troubleshooting → Reset\" next time."));
+                }
+                vpn_pid = 0;
             }
         }
     }
 
-    if (save) {
-        NekoGui::dataStore->remember_spmode.removeAll("vpn");
-        if (enable && NekoGui::dataStore->remember_enable) {
-            NekoGui::dataStore->remember_spmode.append("vpn");
-        }
-        NekoGui::dataStore->Save();
-    }
-
-    NekoGui::dataStore->spmode_vpn = enable;
-    refresh_status();
-
-    if (NekoGui::dataStore->vpn_internal_tun && NekoGui::dataStore->started_id >= 0) neko_start(NekoGui::dataStore->started_id);
+    apply_state(enable);
 }
 
 void MainWindow::refresh_status(const QString &traffic_update) {
@@ -1384,6 +1630,30 @@ void MainWindow::on_menu_scan_qr_triggered() {
 #ifndef NKR_NO_ZXING
     using namespace ZXingQt;
 
+    // macOS 10.15+ 没有"屏幕录制"权限时，grabWindow 不报错，只返回一张**把窗口内容
+    // 整块剔除**的图（只剩壁纸）→ ReadBarcode 恒为空 → 每次点都弹 "QR Code not found"。
+    // 所以先查权限，别让用户以为二维码坏了。
+#ifdef Q_OS_MACOS
+    if (!NekoGui_mac::HasScreenCaptureAccess()) {
+        QMessageBox box(QMessageBox::Question, software_name,
+                        tr("Scanning a QR code from the screen needs the \"Screen Recording\" permission.\n\n"
+                           "Grant it in System Settings → Privacy & Security → Screen Recording, "
+                           "then restart RekoBox and try again.\n\n"
+                           "Tip: \"Add profile from clipboard\" works without any permission."),
+                        QMessageBox::NoButton, GetMessageBoxParent());
+        auto openBtn = box.addButton(tr("Open System Settings"), QMessageBox::AcceptRole);
+        box.addButton(tr("Cancel"), QMessageBox::RejectRole);
+        box.exec();
+        if (box.clickedButton() == openBtn) {
+            // 弹系统授权框（把本 App 加进列表）；真正的权限要重启后才生效
+            NekoGui_mac::RequestScreenCaptureAccess();
+            QDesktopServices::openUrl(
+                QUrl("x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"));
+        }
+        return;
+    }
+#endif
+
     hide();
     QThread::sleep(1);
 
@@ -1401,7 +1671,15 @@ void MainWindow::on_menu_scan_qr_triggered() {
     auto result = ReadBarcode(qpx.toImage(), hints);
     const auto &text = result.text();
     if (text.isEmpty()) {
+#ifdef Q_OS_MACOS
+        MessageBoxInfo(software_name,
+                       tr("QR Code not found") + "\n\n" +
+                           tr("If the QR code was on another app's window, check that "
+                              "RekoBox still has the \"Screen Recording\" permission — "
+                              "after re-granting it the app must be restarted."));
+#else
         MessageBoxInfo(software_name, tr("QR Code not found"));
+#endif
     } else {
         show_log_impl("QR Code Result:\n" + text);
         NekoGui_sub::groupUpdater->AsyncUpdate(text);
@@ -1580,16 +1858,32 @@ void MainWindow::show_log_impl(const QString &log) {
 #ifdef Q_OS_MACOS
         // TUN 开着时整机流量都进内核，info 级别下面板会被"正常连接"淹没
         // （实测 240 行/秒，5125 行里零错误，其中 1563 行是同一个目标在重试 QUIC）。
-        // 面板只留错误/告警和我们自己的提示；完整日志仍在 config/neko.log，排查不受影响。
-        if (showThisLine && NekoGui::dataStore->spmode_vpn) {
+        //
+        // P1-11：原来是**硬编码**丢弃，与 Windows 不一致，用户看不到"正在连接哪个节点"，
+        // 排障时容易误判成"没反应"。现在改成显式级别选择器（三平台共用），
+        // TUN 模式下默认收紧到"警告及以上"，需要看细节时用户自己调回"全部"。
+        if (showThisLine && NekoGui::dataStore->spmode_vpn && NekoGui::dataStore->log_panel_level == 0) {
             const auto lower = line.toLower();
             const bool keep = lower.contains("error") || lower.contains("warn") ||
                               lower.contains("panic") || lower.contains("fatal") ||
                               line.startsWith("[mac]") || line.startsWith("[tun]") ||
-                              line.startsWith(">>>>>>>>");
+                              line.startsWith(">>>>>>>>") || line.startsWith("<<<<<<<<");
             if (!keep) showThisLine = false;
         }
 #endif
+        // 级别过滤（显式选择的，优先于上面的默认策略）
+        if (showThisLine && NekoGui::dataStore->log_panel_level == 1) {
+            const auto lower = line.toLower();
+            if (!(lower.contains("error") || lower.contains("warn") || lower.contains("panic") ||
+                  lower.contains("fatal") || line.startsWith(">>>>>>>>") || line.startsWith("<<<<<<<<"))) {
+                showThisLine = false;
+            }
+        } else if (showThisLine && NekoGui::dataStore->log_panel_level == 2) {
+            const auto lower = line.toLower();
+            if (!(lower.contains("error") || lower.contains("panic") || lower.contains("fatal"))) {
+                showThisLine = false;
+            }
+        }
         if (showThisLine) newLines << line;
     }
     if (newLines.isEmpty()) return;
@@ -1620,6 +1914,27 @@ void MainWindow::on_masterLogBrowser_customContextMenuRequested(const QPoint &po
     QMenu *menu = ui->masterLogBrowser->createStandardContextMenu();
 
     auto sep = new QAction(this);
+    sep->setSeparator(true);
+    menu->addAction(sep);
+
+    // 日志级别（P1-11）：MAC 原来在 TUN 下硬拒绝 info 级别的行，用户看不到
+    // "正在连接哪个节点"，排障时以为没反应。现在给显式开关，三平台一致。
+    auto level_menu = menu->addMenu(tr("Log level"));
+    auto add_level = [=](const QString &text, int value) {
+        auto a = level_menu->addAction(text);
+        a->setCheckable(true);
+        a->setChecked(NekoGui::dataStore->log_panel_level == value);
+        connect(a, &QAction::triggered, this, [=] {
+            NekoGui::dataStore->log_panel_level = value;
+            NekoGui::dataStore->Save();
+            MW_show_log(tr("[app] log level → %1").arg(text));
+        });
+    };
+    add_level(tr("All (verbose)"), 0);
+    add_level(tr("Warnings and errors"), 1);
+    add_level(tr("Errors only"), 2);
+
+    sep = new QAction(this);
     sep->setSeparator(true);
     menu->addAction(sep);
 
@@ -1798,7 +2113,16 @@ void MainWindow::RegisterHotkey(bool unregister) {
         auto hk = RegisteredHotkey.takeFirst();
         hk->deleteLater();
     }
+    hotkey_failures.clear();
     if (unregister) return;
+
+    // 名字只用于提示文案，顺序与下面的 regstr 一一对应
+    const QStringList names{
+        tr("Show main window"),
+        tr("Show groups"),
+        tr("Show routes"),
+        tr("System proxy menu"),
+    };
 
     QStringList regstr{
         NekoGui::dataStore->hotkey_mainwindow,
@@ -1807,21 +2131,40 @@ void MainWindow::RegisterHotkey(bool unregister) {
         NekoGui::dataStore->hotkey_system_proxy_menu,
     };
 
-    for (const auto &key: regstr) {
+    for (int i = 0; i < regstr.size(); i++) {
+        const auto &key = regstr[i];
         if (key.isEmpty()) continue;
-        if (regstr.count(key) > 1) return; // Conflict hotkey
-    }
-    for (const auto &key: regstr) {
+        if (regstr.count(key) > 1) {
+            hotkey_failures << tr("%1: %2 (duplicated)").arg(names[i], key);
+            continue; // 原来这里是 return，会让后面所有热键一起不注册
+        }
         QKeySequence k(key);
-        if (k.isEmpty()) continue;
+        if (k.isEmpty()) {
+            hotkey_failures << tr("%1: %2 (cannot be parsed)").arg(names[i], key);
+            continue;
+        }
         auto hk = std::make_shared<QHotkey>(k, true);
         if (hk->isRegistered()) {
             RegisteredHotkey += hk;
             connect(hk.get(), &QHotkey::activated, this, [=] { HotkeyEvent(key); });
         } else {
-            hk->deleteLater();
+            // 注册不上通常是"已被别的 App 或系统菜单占用"。
+            // 原来这里静默 deleteLater，用户按了没反应却没有任何线索。
+            // 用 NativeText 显示，mac 上才会写成 ⌘S 而不是 Ctrl+S，否则用户按提示
+            // 去试的键位是错的（Qt 在 mac 把物理 Command 映射成 Qt::CTRL，
+            // 所以存储的 "Ctrl+S" 在 mac 上就是 ⌘S）。
+            hotkey_failures << tr("%1: %2 (already used by another app)").arg(names[i], k.toString(QKeySequence::NativeText));
+            if (hk) hk->deleteLater();
         }
     }
+
+    for (const auto &f: hotkey_failures) {
+        qWarning() << "[hotkey] register failed:" << f;
+    }
+}
+
+QString MainWindow::HotkeyFailureSummary() const {
+    return hotkey_failures.join("\n");
 }
 
 void MainWindow::HotkeyEvent(const QString &key) {
@@ -1854,6 +2197,11 @@ bool MainWindow::StartVPNProcess() {
     if (vpn_pid != 0) {
         return true;
     }
+#ifdef Q_OS_MACOS
+    // 启动前清掉上一次的"请停"标记：正常退出会删掉，但崩溃/强杀会留下。
+    // 留着的后果是——新 tun 脚本刚起来就被自己那个哨兵看到标记而立刻退掉。
+    QFile::remove(QDir::current().absoluteFilePath("tun-stop-request"));
+#endif
     //
     // 节点地址要传给 tun 配置生成：它得被排除在 tun 路由外，否则主内核连节点会回环
     auto configPath = NekoGui::WriteVPNSingBoxConfig(running != nullptr ? running->bean->serverAddress : QString());
@@ -1896,7 +2244,9 @@ bool MainWindow::StartVPNProcess() {
             const auto lower = line.toLower();
             if (lower.contains("error") || lower.contains("panic") || lower.contains("fatal") ||
                 lower.contains("warn")) {
-                MW_show_log("[tun] " + line.left(300));
+                // 内核带 --disable-color 时一般没有转义序列，但老配置/手工启动的
+                // 内核会带 ANSI 颜色码，面板上会显示成 "[0m" 之类的乱码。
+                MW_show_log("[tun] " + cleanVT100String(line).left(300));
             }
         }
     });
@@ -1913,26 +2263,40 @@ bool MainWindow::StartVPNProcess() {
     vpn_pid = vpn_process->processId(); // actually it's pkexec or bash PID
 
 #ifdef Q_OS_MACOS
-    // 接管系统 DNS：照安卓的做法，指向 tun 网段里的 172.19.0.2（安卓的
-    // PRIVATE_VLAN4_ROUTER 就是它），查询会进 utun，被 "port 53 → dns-out" 规则接住。
-    // 硬编码公共 DNS 不走这条路，由 tun 路由直接捕获，两条都覆盖。
+    // 接管系统 DNS（P1-8）。
     //
-    // 必须先探测到应答再切：探测不通就保持原样（域名继续走路由器），
-    // 宁可没接管，也不能让整机解析挂掉。
+    // tun 内核现在自己监听 127.0.0.1:53（见 ConfigBuilder 里的 dns-in 入站），
+    // 所以这里探测的是 **127.0.0.1**，探通才把系统 DNS 切过去——这是真正意义上的
+    // 接管：解析请求一定走本机那个 root 进程，再经隧道出去，不再依赖
+    // "发往 172.19.0.2 会不会被路由劫持"这种实测不成立的假设。
+    //
+    // 探测与切换都**不能在 UI 线程做**：
+    //   ProbeDNS 每次最多等 900ms × 4 次；ApplyTunDNS 要对每个网络服务跑一次
+    //   networksetup（单次超时 15 秒，VLAN / 雷雳桥接 / 闲置服务都会出现）。
+    //   原来这些全在 UI 线程同步跑，实测表现是"勾上 TUN 后界面卡住十几秒"。
     auto tries = std::make_shared<int>(0);
     auto probe = std::make_shared<std::function<void()>>();
     *probe = [this, tries, probe] {
         if (vpn_pid == 0) return; // tun 已经退了，别再动 DNS
-        if (NekoGui_mac::ProbeDNS("172.19.0.2", 53)) {
-            NekoGui_mac::ApplyTunDNS(true);
-            MW_show_log("[mac] 系统 DNS 已接管到 172.19.0.2（走 tun 内核解析）");
-            return;
-        }
-        if (++(*tries) >= 4) {
-            MW_show_log("[Warn][mac] tun 的 DNS 没应答，这次不接管系统 DNS（域名仍由路由器解析）");
-            return;
-        }
-        QTimer::singleShot(800, this, [probe] { (*probe)(); });
+
+        const auto running_pid = vpn_pid;
+        runOnNewThread([this, running_pid, tries, probe] {
+            if (!NekoGui_mac::ProbeDNS("127.0.0.1", 53)) {
+                if (++(*tries) >= 4) {
+                    runOnUiThread([] {
+                        MW_show_log("[Warn][mac] tun 的 DNS 没应答，这次不接管系统 DNS（域名仍由路由器解析）");
+                    });
+                    return;
+                }
+                runOnUiThread([probe] { QTimer::singleShot(800, GetMainWindow(), [probe] { (*probe)(); }); });
+                return;
+            }
+            if (GetMainWindow()->vpn_pid != running_pid) return; // 期间被停掉了
+            NekoGui_mac::ApplyTunDNS(true, "127.0.0.1");
+            runOnUiThread([] {
+                MW_show_log("[mac] 系统 DNS 已接管到 127.0.0.1:53（tun 内核 → 隧道解析，无泄漏）");
+            });
+        });
     };
     QTimer::singleShot(1200, this, [probe] { (*probe)(); });
 #endif
@@ -1940,38 +2304,104 @@ bool MainWindow::StartVPNProcess() {
     return true;
 }
 
-bool MainWindow::StopVPNProcess(bool unconditional) {
-    if (unconditional || vpn_pid != 0) {
-        bool ok;
-        core_process->processId();
-#ifdef Q_OS_MACOS
-        // 只做残留清理：早期试验版留下的 tun-dns-state.json 会被还原删除，没有就是空操作
-        NekoGui_mac::RecoverTunDNSIfNeeded();
+// 真正去杀 tun 内核 + 还原 DNS 快照。**不碰 UI，不改成员变量**，可以安全地在
+// worker 线程里跑。返回 true 表示内核已经收到 SIGINT 并退出（pkill/killall/taskkill 成功）。
+static bool stop_tun_process_blocking(bool unconditional, qint64 core_pid, qint64 vpn_pid_in)
+{
+#if defined(Q_OS_MACOS)
+    // DNS 快照还原要跑 N 次 networksetup（单次超时 15 秒），必须在后台线程做，
+    // 否则某个网络服务卡住时界面直接假死。只做残留清理：早期试验版留下的
+    // tun-dns-state.json 会被还原删除，没有就是空操作。
+    (void) core_pid;
+    Q_UNUSED(vpn_pid_in)
+    NekoGui_mac::RecoverTunDNSIfNeeded();
 #endif
-#ifdef Q_OS_WIN
-        auto ret = WinCommander::runProcessElevated("taskkill", {"/IM", "rekobox_core.exe",
-                                                                 "/FI",
-                                                                 "PID ne " + Int2String(core_process->processId())});
-        ok = ret == 0;
-#else
-        QProcess p;
-#ifdef Q_OS_MACOS
-        p.start("osascript", {"-e", QStringLiteral("do shell script \"%1\" with administrator privileges")
-                                        .arg("pkill -2 -U 0 rekobox_core")});
-#else
-        if (unconditional) {
-            p.start("pkexec", {"killall", "-2", "rekobox_core"});
-        } else {
-            p.start("pkexec", {"pkill", "-2", "-P", Int2String(vpn_pid)});
+#if defined(Q_OS_WIN)
+    auto ret = WinCommander::runProcessElevated("taskkill", {"/IM", "rekobox_core.exe",
+                                                             "/FI",
+                                                             "PID ne " + Int2String(core_pid)});
+    return ret == 0;
+#elif defined(Q_OS_MACOS)
+    // mac 的停止分两条路：
+    //
+    // 1. 首选：哨兵握手（P0-3）。tun 脚本以 root 起来后自己盯着 config/tun-stop-request，
+    //    GUI 只要建个文件（不需要提权）它就 SIGTERM 内核。
+    //    → 正常启停全程只输一次密码，与 Windows 对齐；用户点"取消"也无从取消，
+    //      不会出现"密码框一取消就关不掉、utun 与路由全残留"的断网死局。
+    // 2. 回退：哨兵不在（旧版脚本 / 被强杀 / 手工起的内核）才走 osascript 提权 pkill。
+    //    这条路仍然会弹密码框，但已带 20 秒上限（原来无参 = 30 秒，密码框弹着时整窗口假死）。
+    Q_UNUSED(unconditional)
+    if (NekoGui_mac::RequestTunStopBySentinel()) {
+        if (NekoGui_mac::WaitTunExit(12000)) {
+            qDebug() << "[mac] tun stopped via sentinel (no extra password prompt)";
+            return true;
         }
-#endif
-        p.waitForFinished();
-        ok = p.exitCode() == 0;
-#endif
-        if (!unconditional) {
-            ok ? vpn_pid = 0 : MessageBoxWarning(tr("Error"), tr("Failed to stop Tun process"));
-        }
-        return ok;
+        qWarning() << "[mac] sentinel did not stop the core within 12s, falling back to osascript";
     }
-    return true;
+
+    QProcess p;
+    p.start("osascript", {"-e", QStringLiteral("do shell script \"%1\" with administrator privileges")
+                                    .arg("pkill -2 -U 0 rekobox_core")});
+    if (!p.waitForFinished(20000)) {
+        // osascript 自己卡住（密码框一直没人输/系统弹框被吞）：杀掉它，按失败处理
+        p.kill();
+        p.waitForFinished(1000);
+        return false;
+    }
+    return p.exitCode() == 0;
+#else
+    QProcess p;
+    if (unconditional) {
+        p.start("pkexec", {"killall", "-2", "rekobox_core"});
+    } else {
+        p.start("pkexec", {"pkill", "-2", "-P", Int2String(vpn_pid_in)});
+    }
+    if (!p.waitForFinished(20000)) {
+        p.kill();
+        p.waitForFinished(1000);
+        return false;
+    }
+    return p.exitCode() == 0;
+#endif
+}
+
+bool MainWindow::StopVPNProcess(bool unconditional) {
+    if (!unconditional && vpn_pid == 0) return true;
+
+    // 这条同步路径只服务两个场景：退出链路、疑难解答→重置。
+    // 用户点勾选框走的是 StopVPNProcessAsync()，不在 UI 线程里等。
+    // 这里仍然在调用线程同步执行，但已带 20 秒上限（原来是无参 = 30 秒且无上限）。
+    const auto ok = stop_tun_process_blocking(unconditional, core_process->processId(), vpn_pid);
+
+    if (!unconditional) {
+        ok ? vpn_pid = 0 : MessageBoxWarning(tr("Error"), tr("Failed to stop Tun process"));
+    } else if (ok) {
+        // unconditional（疑难解答 → 重置）是"强制清理残留"：pid 也一并清掉，
+        // 否则后面的 StartVPNProcess() 会认为"已经有一个在跑"而直接 return true，
+        // 用户点了重置反而再也起不来 TUN。
+        vpn_pid = 0;
+        if (NekoGui::dataStore->spmode_vpn) {
+            NekoGui::dataStore->spmode_vpn = false;
+            refresh_status();
+        }
+    }
+    return ok;
+}
+
+void MainWindow::StopVPNProcessAsync(bool unconditional, const std::function<void(bool)> &onDone) {
+    if (!unconditional && vpn_pid == 0) {
+        onDone(true);
+        return;
+    }
+
+    const auto core_pid = core_process->processId();
+    const auto pid_snapshot = vpn_pid;
+    // worker 线程负责：DNS 快照还原 + 等 osascript/pkexec 返回，全程不阻塞 UI
+    runOnNewThread([=] {
+        const auto ok = stop_tun_process_blocking(unconditional, core_pid, pid_snapshot);
+        runOnUiThread([=] {
+            if (!unconditional && ok) vpn_pid = 0;
+            onDone(ok);
+        });
+    });
 }

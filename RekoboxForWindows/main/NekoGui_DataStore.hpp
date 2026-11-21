@@ -111,6 +111,16 @@ namespace NekoGui {
         QString mw_size = "";
         QString system_proxy_format = "";
         QStringList log_ignore = {};
+        // 日志**面板**级别（P1-11）：0=全部 1=只看警告及以上 2=只看错误
+        //
+        // 注意别和上面的 log_level（字符串，内核自己的 --log-level）混了，
+        // 那个管的是"内核输出什么"，这个管的是"面板显示什么"。
+        //
+        // 背景：mac 原来在 TUN 模式下**硬编码**只放行 error/warn/panic/[mac]/[tun]，
+        // 理由是 TUN 下每秒 240 行 connection 日志会把面板刷爆（实测 5125 行里零错误）。
+        // 理由成立，但行为与 Windows 不一致：用户看不到"正在连接哪个节点"，
+        // 排障时容易误判成"没反应"。现在改成三平台共用的显式开关。
+        int log_panel_level = 0;
         bool start_minimal = false;
         int max_log_line = 200;
         QString splitter_state = "";

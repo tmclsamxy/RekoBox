@@ -45,6 +45,8 @@
             },
             {
                 "process_name": [
+                    "rekobox_core",
+                    "rekobox_core.exe",
                     "nekoray_core",
                     "nekoray_core.exe",
                     "nekobox_core",
@@ -73,6 +75,7 @@
             "endpoint_independent_nat": true,
             "sniff": false
         }
+        //%DNS_INBOUND%
     ],
     "outbounds": [
         {
@@ -128,6 +131,8 @@
             {
                 "port": 53,
                 "process_name": [
+                    "rekobox_core",
+                    "rekobox_core.exe",
                     "nekoray_core",
                     "nekoray_core.exe"
                 ],
@@ -135,6 +140,8 @@
             },
             {
                 "process_name": [
+                    "rekobox_core",
+                    "rekobox_core.exe",
                     "nekoray_core",
                     "nekoray_core.exe",
                     "nekobox_core",
@@ -148,7 +155,9 @@
             {
                 "port": 53,
                 "outbound": "dns-out"
-            },
+            }
+            //%DNS_INBOUND_RULE%
+            ,
             {
                 // 局域网直连。必须排在上面那条 53 规则之后：
                 // 发往路由器 53 端口的查询要先被 dns-out 劫持，其余内网流量才直出。

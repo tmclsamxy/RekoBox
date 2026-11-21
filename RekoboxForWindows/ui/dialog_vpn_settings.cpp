@@ -6,6 +6,8 @@
 #include "ui/mainwindow_interface.h"
 
 #include <QMessageBox>
+#include <QLabel>
+#include <QLayout>
 
 DialogVPNSettings::DialogVPNSettings(QWidget *parent) : QDialog(parent), ui(new Ui::DialogVPNSettings) {
     ui->setupUi(this);
@@ -25,6 +27,24 @@ DialogVPNSettings::DialogVPNSettings(QWidget *parent) : QDialog(parent), ui(new 
     // mac 上这条选项永远不可能生效（主程序不是 root，建不了 utun），
     // 露出来只会让人勾了之后收到 "operation not permitted"，直接隐藏
     ui->single_core->setVisible(false);
+
+    // P1-9：「按进程分流」在 mac 上是**空转**。
+    // 这一版 sing-tun 在 darwin 不提供 ProcessInfo，process_name 规则既不报错也不生效
+    // （HANDOFF §4.1 已实测记录）。让用户填了还以为有用，比不给入口更糟——
+    // 排障时会被这条误导："我明明绕过了它"。
+    // 所以禁用输入并写明原因，不要静默保留一个假开关。
+    ui->vpn_rule_process->setEnabled(false);
+    ui->vpn_rule_process->setPlaceholderText(
+            tr("Not supported on macOS: the sing-tun build for darwin does not expose "
+               "per-process information, so process-based routing cannot work here.\n"
+               "Use \"Bypass CIDR\" instead, or per-app rules on the Android client."));
+    ui->gb_process_name->setToolTip(
+            tr("macOS limitation: process-based split routing is unavailable in this build."));
+    auto mac_note = new QLabel(tr("⚠️ Not available on macOS (sing-tun on darwin has no ProcessInfo). "
+                                  "Use Bypass CIDR instead."));
+    mac_note->setWordWrap(true);
+    mac_note->setStyleSheet("color: #b06000;");
+    ui->gb_process_name->layout()->addWidget(mac_note);
 #endif
     //
     D_LOAD_STRING_PLAIN(vpn_rule_cidr)

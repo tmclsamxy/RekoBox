@@ -6,6 +6,8 @@
 #include <random>
 
 #include <QApplication>
+#include <QCoreApplication>
+#include <QThread>
 #include <QUrlQuery>
 #include <QTcpServer>
 #include <QTimer>
@@ -20,6 +22,9 @@
 
 #ifdef Q_OS_WIN
 #include "sys/windows/guihelper.h"
+#endif
+#ifdef Q_OS_MACOS
+#include "sys/macos/Gui.hpp"
 #endif
 
 QStringList SplitLines(const QString &_string) {
@@ -218,10 +223,18 @@ int MessageBoxInfo(const QString &title, const QString &text) {
 }
 
 void ActivateWindow(QWidget *w) {
+    if (w == nullptr) return;
     w->setWindowState(w->windowState() & ~Qt::WindowMinimized);
     w->setVisible(true);
 #ifdef Q_OS_WIN
     Windows_QWidget_SetForegroundWindow(w);
+#endif
+#ifdef Q_OS_MACOS
+    // mac 上 raise() + activateWindow() 在 App 不是前台进程时通常只闪一下：
+    // Qt 这两个调用走的是窗口层级和"请求激活"，系统会拒绝非前台 App 的抢占。
+    // 必须先让 NSApp 自己抢到前台（activateIgnoringOtherApps），窗口才抬得起来。
+    // 顺序不能反：先 activate 再 raise，否则 raise 发生在 App 未激活时无效。
+    NekoGui_mac::ActivateAppIgnoringOtherApps();
 #endif
     w->raise();
     w->activateWindow();
@@ -229,16 +242,61 @@ void ActivateWindow(QWidget *w) {
 
 void runOnUiThread(const std::function<void()> &callback, QObject *parent) {
     // any thread
-    auto *timer = new QTimer();
-    auto thread = dynamic_cast<QThread *>(parent);
-    if (thread == nullptr) {
-        timer->moveToThread(parent == nullptr ? mainwindow->thread() : parent->thread());
+    //
+    // ⚠️ 语义陷阱（P0-2 的一部分）：parent 传 QThread* 时，回调跑在**那个 QThread 管理的
+    // 线程**上，不是 UI 线程。历史上 mainwindow_grpc.cpp / mainwindow.cpp 有 6 处传了
+    // `DS_cores`，注释写着"main thread"但实际跑在 cores 线程，于是：
+    //   - 那些回调里碰了 UI 对象（run-in-wrong-thread）
+    //   - 更糟的是回调里捕获了调用方栈上的变量（`[&]` + 阻塞式信号量握手），
+    //     一旦队列延迟到栈帧销毁之后执行，就是往已释放的栈上写 → 堆/栈被写坏。
+    // 崩溃报告里 `QThread::exec → activateSocketNotifiers → notifyInternal2 → 读 QThreadData`
+    // 的 SIGBUS、以及 `tiny_free_list_remove_ptr` 的堆损坏，都和这一类相符。
+    //
+    // 现在：QThread* 仍按"投递到该线程"处理（保持兼容），但会打一条 warn，
+    // 逼调用方显式选择 runOnThread() 或留空走 UI 线程。
+    QThread *target = nullptr;
+    if (parent == nullptr) {
+        if (mainwindow == nullptr || QCoreApplication::closingDown()) return;
+        target = mainwindow->thread();
+    } else if (auto as_thread = qobject_cast<QThread *>(parent)) {
+        qWarning() << "[thread] runOnUiThread() was given a QThread*; the callback will run on"
+                   << "that thread, NOT the UI thread. Use runOnThread() to be explicit.";
+        target = as_thread;
     } else {
-        timer->moveToThread(thread);
+        target = parent->thread();
     }
+
+    if (target == nullptr || !target->isRunning()) {
+        // 线程没在跑就没有事件循环，投递过去永远不会执行（原来的实现会静默漏掉回调
+        // 并泄漏 QTimer）。直接在调用方线程里跑，至少不会丢事件。
+        callback();
+        return;
+    }
+
+    auto *timer = new QTimer();
+    timer->moveToThread(target);
     timer->setSingleShot(true);
-    QObject::connect(timer, &QTimer::timeout, [=]() {
-        // main thread
+    QObject::connect(timer, &QTimer::timeout, timer, [callback, timer]() {
+        callback();
+        timer->deleteLater();
+    });
+    QMetaObject::invokeMethod(timer, "start", Qt::QueuedConnection, Q_ARG(int, 0));
+}
+
+void runOnThread(QThread *thread, const std::function<void()> &callback) {
+    if (thread == nullptr || thread == QThread::currentThread()) {
+        callback();
+        return;
+    }
+    if (!thread->isRunning()) {
+        qWarning() << "[thread] runOnThread(): target thread is not running, running inline";
+        callback();
+        return;
+    }
+    auto *timer = new QTimer();
+    timer->moveToThread(thread);
+    timer->setSingleShot(true);
+    QObject::connect(timer, &QTimer::timeout, timer, [callback, timer]() {
         callback();
         timer->deleteLater();
     });

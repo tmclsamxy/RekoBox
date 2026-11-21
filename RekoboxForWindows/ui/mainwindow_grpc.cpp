@@ -15,6 +15,11 @@
 #include <QMessageBox>
 #include <QDialogButtonBox>
 
+#include <atomic>
+#include <list>
+#include <memory>
+#include <QSemaphore>
+
 // ext core
 
 std::list<std::shared_ptr<NekoGui_sys::ExternalProcess>> CreateExtCFromExtR(const std::list<std::shared_ptr<NekoGui_fmt::ExternalBuildResult>> &extRs, bool start) {
@@ -155,8 +160,15 @@ void MainWindow::speedtest_current_group(int mode, bool test_group) {
                     req.set_url(NekoGui::dataStore->test_latency_url.toStdString());
 
                     //
-                    std::list<std::shared_ptr<NekoGui_sys::ExternalProcess>> extCs;
-                    QSemaphore extSem;
+                    // ext core 由 DS_cores 线程创建/杀死（QProcess 需要事件循环）。
+                    // extCs 用堆上的 shared_ptr 共享，**不能**按引用捕获栈变量：
+                    // runOnThread 是排队执行，回调可能在栈帧销毁后才跑，
+                    // 那会往已释放的栈上写 —— 2026-11-20 的
+                    // `malloc_zone_error / tiny_free_list_remove_ptr` 堆损坏即此类（P0-2）。
+                    auto extCs = std::make_shared<std::list<std::shared_ptr<NekoGui_sys::ExternalProcess>>>();
+                    // QSemaphore 不可拷贝，且回调是延迟执行的：放堆上由 shared_ptr 持有，
+                    // 保证握手用的信号量活得比栈帧长。
+                    auto extSem = std::make_shared<QSemaphore>();
 
                     if (mode == libcore::TestMode::UrlTest || mode == libcore::FullTest) {
                         auto c = BuildConfig(profile, true, false);
@@ -171,14 +183,13 @@ void MainWindow::speedtest_current_group(int mode, bool test_group) {
                         }
                         //
                         if (!c->extRs.empty()) {
-                            runOnUiThread(
-                                [&] {
-                                    extCs = CreateExtCFromExtR(c->extRs, true);
-                                    QThread::msleep(500);
-                                    extSem.release();
-                                },
-                                DS_cores);
-                            extSem.acquire();
+                            auto extRs = c->extRs; // 按值带走，别让回调依赖 c 的生命周期
+                            runOnThread(DS_cores, [=] {
+                                *extCs = CreateExtCFromExtR(extRs, true);
+                                QThread::msleep(500);
+                                extSem->release();
+                            });
+                            extSem->acquire();
                         }
                         //
                         auto config = new libcore::LoadConfigReq;
@@ -200,16 +211,15 @@ void MainWindow::speedtest_current_group(int mode, bool test_group) {
                     bool rpcOK;
                     auto result = defaultClient->Test(&rpcOK, req);
                     //
-                    if (!extCs.empty()) {
-                        runOnUiThread(
-                            [&] {
-                                for (const auto &extC: extCs) {
-                                    extC->Kill();
-                                }
-                                extSem.release();
-                            },
-                            DS_cores);
-                        extSem.acquire();
+                    if (!extCs->empty()) {
+                        // 按值捕获 shared_ptr，回调可能在本栈帧之后执行
+                        runOnThread(DS_cores, [=] {
+                            for (const auto &extC: *extCs) {
+                                extC->Kill();
+                            }
+                            extSem->release();
+                        });
+                        extSem->acquire();
                     }
                     //
                     if (!rpcOK) return;
@@ -330,20 +340,26 @@ void MainWindow::neko_start(int _id) {
         NekoGui_traffic::trafficLooper->loop_enabled = true;
 #endif
 
-        runOnUiThread(
-            [=] {
-                auto extCs = CreateExtCFromExtR(result->extRs, true);
-                NekoGui_sys::running_ext.splice(NekoGui_sys::running_ext.end(), extCs);
-            },
-            DS_cores);
+        // ext core 必须在有事件循环的线程里 Start（QProcess 靠 notifier 收退出/输出）。
+        // 调用方是 std::async 出来的线程，没有事件循环，所以才投给 DS_cores。
+        // 这里显式写 runOnThread：原来用 runOnUiThread(..., DS_cores) 表达"投到 cores 线程"，
+        // 名字和行为不符（见 P0-2），读代码的人会以为它跑在 UI 线程。
+        // running_ext 的所有增删都在 DS_cores 上，保持一致。
+        runOnThread(DS_cores, [=] {
+            auto extCs = CreateExtCFromExtR(result->extRs, true);
+            NekoGui_sys::running_ext.splice(NekoGui_sys::running_ext.end(), extCs);
+        });
 
-        NekoGui::dataStore->UpdateStartedId(ent->id);
-        running = ent;
-
-        runOnUiThread([=] {
+        // running 是 UI 线程（refresh_status / StartVPNProcess）会读的 shared_ptr，
+        // 在这里的 worker 线程直接赋值属于无保护的并发写（= 撕裂指针 → 崩溃）。
+        // 统一改成原子读写，赋值也放回 UI 线程。
+        runOnUiThread([this, ent] {
+            std::atomic_store(&running, ent);
             refresh_status();
             refresh_proxy_list(ent->id);
         });
+
+        NekoGui::dataStore->UpdateStartedId(ent->id);
 
         return true;
     };
@@ -361,13 +377,14 @@ void MainWindow::neko_start(int _id) {
 
     // check core state
     if (!NekoGui::dataStore->core_running) {
-        runOnUiThread(
-            [=] {
-                MW_show_log("Try to start the config, but the core has not listened to the grpc port, so restart it...");
-                core_process->start_profile_when_core_is_up = ent->id;
-                core_process->Restart();
-            },
-            DS_cores);
+        // core_process 现在是 UI 线程持有的 QProcess（见 mainwindow.cpp 的说明），
+        // Restart() 里有 kill + waitForFinished，必须留在同一个线程，
+        // 否则又回到"两个线程碰同一个 QProcess"的老问题。
+        runOnUiThread([this, ent] {
+            MW_show_log("Try to start the config, but the core has not listened to the grpc port, so restart it...");
+            core_process->start_profile_when_core_is_up = ent->id;
+            core_process->Restart();
+        });
         mu_starting.unlock();
         return; // let CoreProcess call neko_start when core is up
     }
@@ -413,15 +430,15 @@ void MainWindow::neko_stop(bool crash, bool sem) {
     }
 
     auto neko_stop_stage2 = [=] {
-        runOnUiThread(
-            [=] {
-                while (!NekoGui_sys::running_ext.empty()) {
-                    auto extC = NekoGui_sys::running_ext.front();
-                    extC->Kill();
-                    NekoGui_sys::running_ext.pop_front();
-                }
-            },
-            DS_cores);
+        // running_ext 全体在 DS_cores 线程创建（上面那条 runOnThread），Kill 也放同一线程。
+        // 原来是 runOnUiThread(..., DS_cores)，名字骗人（P0-2）。
+        runOnThread(DS_cores, [] {
+            while (!NekoGui_sys::running_ext.empty()) {
+                auto extC = NekoGui_sys::running_ext.front();
+                extC->Kill();
+                NekoGui_sys::running_ext.pop_front();
+            }
+        });
 
 #ifndef NKR_NO_GRPC
         NekoGui_traffic::trafficLooper->loop_enabled = false;
@@ -453,9 +470,10 @@ void MainWindow::neko_stop(bool crash, bool sem) {
 
         NekoGui::dataStore->UpdateStartedId(-1919);
         NekoGui::dataStore->need_keep_vpn_off = false;
-        running = nullptr;
 
-        runOnUiThread([=] {
+        // 同 neko_start：running 只允许 UI 线程写（见那里的说明）
+        runOnUiThread([this, id] {
+            std::atomic_store(&running, std::shared_ptr<NekoGui::ProxyEntity>());
             refresh_status();
             refresh_proxy_list(id);
         });
@@ -476,7 +494,11 @@ void MainWindow::neko_stop(bool crash, bool sem) {
 
     runOnNewThread([=] {
         // do stop
-        MW_show_log(">>>>>>>> " + tr("Stopping profile %1").arg(running->bean->DisplayTypeAndName()));
+        // 先在本线程原子取一份快照：running 只在 UI 线程改，直接解引用可能读到
+        // 正被替换到一半的 shared_ptr（撕裂 → 崩溃）。取到空就跳过日志。
+        if (auto ent = std::atomic_load(&running)) {
+            MW_show_log(">>>>>>>> " + tr("Stopping profile %1").arg(ent->bean->DisplayTypeAndName()));
+        }
         if (!neko_stop_stage2()) {
             MW_show_log("<<<<<<<< " + tr("Failed to stop, please restart the program."));
         }

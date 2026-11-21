@@ -13,23 +13,42 @@
 #include <QUdpSocket>
 #include <QStandardPaths>
 #include <QStyle>
+#include <QElapsedTimer>
 #include <QStyleFactory>
+#include <QThread>
+
+// CGPreflightScreenCaptureAccess / CGRequestScreenCaptureAccess（macOS 10.15+）。
+// 只在 CoreGraphics 里有声明，没有 ObjC 依赖，所以这个 .cpp 不用改成 .mm。
+#include <CoreGraphics/CoreGraphics.h>
 
 namespace {
     constexpr auto DNS_STATE_FILE = "tun-dns-state.json";
+    // 与 res/vpn/vpn-run-root-macos.sh 里的路径必须一致（同一个 config 目录）
+    constexpr auto TUN_PID_FILE = "tun-root.pid";
+    constexpr auto TUN_STOP_REQUEST_FILE = "tun-stop-request";
     // 与安卓端一致：VpnService.addDnsServer(PRIVATE_VLAN4_ROUTER)，值就是 172.19.0.2。
-    // 必须落在 tun 的 inet4_address 网段内（172.19.0.1/28），且不能是接口地址本身。
+    // 历史方案：把系统 DNS 指向它，指望"落在 tun 网段所以会进隧道"。
+    //
+    // 实测不成立（P1-8 的根因）：utun 上并没有服务监听 172.19.0.2:53，内核把发往
+    // 同网段地址的包直接投递给接口（当作直连邻居），根本走不到
+    // "port 53 → dns-out" 那条规则 → 探活恒失败 → 系统 DNS 从未被真正接管。
+    //
+    // 现在的做法见 db/ConfigBuilder.cpp 里的 dns-in 入站：tun 内核（root）自己监听
+    // 127.0.0.1:53，系统 DNS 指向 127.0.0.1。所以 TUN_DNS_ADDRESS 只用于还原旧快照
+    // 与兼容老版本留下的 tun-dns-state.json，正常路径不再使用它。
     constexpr auto TUN_DNS_ADDRESS = "172.19.0.2";
     // 探测不到任何可用上游时的兜底（阿里 DNS，国内可用性最好）
     constexpr auto FALLBACK_DNS = "223.5.5.5";
 
-    QString DnsStatePath() {
+    QString ConfigDir() {
         // 运行期 cwd 就是 config 目录（main.cpp 里 setCurrent 过）
         auto dir = QDir::current();
-        if (!dir.absolutePath().isEmpty() && dir.exists()) {
-            return dir.absoluteFilePath(DNS_STATE_FILE);
-        }
-        return QDir(NekoGui_mac::DataDir()).absoluteFilePath(DNS_STATE_FILE);
+        if (!dir.absolutePath().isEmpty() && dir.exists()) return dir.absolutePath();
+        return QDir(NekoGui_mac::DataDir()).absoluteFilePath("config");
+    }
+
+    QString DnsStatePath() {
+        return QDir(ConfigDir()).absoluteFilePath(DNS_STATE_FILE);
     }
 
     QString NetSet(const QStringList &args) {
@@ -161,6 +180,10 @@ namespace NekoGui_mac {
     }
 
     void ApplyTunDNS(bool enable) {
+        ApplyTunDNS(enable, TUN_DNS_ADDRESS);
+    }
+
+    void ApplyTunDNS(bool enable, const QString &address) {
         const auto statePath = DnsStatePath();
 
         if (!enable) {
@@ -188,7 +211,7 @@ namespace NekoGui_mac {
         }
 
         // 已经接管过就别再抓一次：否则会把 tun 地址当成"用户原本的 DNS"存下来，
-        // 还原时写回 172.19.0.2，TUN 一停就整机解析不了
+        // 还原时写回接管地址，TUN 一停就整机解析不了
         if (QFile::exists(statePath)) {
             qDebug() << "[mac] DNS already taken over, keep the original snapshot";
             return;
@@ -218,9 +241,9 @@ namespace NekoGui_mac {
         f.close();
 
         for (const auto &service: NetworkServices()) {
-            NetSet({"-setdnsservers", service, TUN_DNS_ADDRESS});
+            NetSet({"-setdnsservers", service, address});
         }
-        qDebug() << "[mac] system DNS ->" << TUN_DNS_ADDRESS;
+        qDebug() << "[mac] system DNS ->" << address;
     }
 
     void RecoverTunDNSIfNeeded() {
@@ -228,6 +251,62 @@ namespace NekoGui_mac {
         if (!QFile::exists(DnsStatePath())) return;
         qDebug() << "[mac] leftover tun DNS detected, restoring before startup";
         ApplyTunDNS(false);
+    }
+
+    bool HasScreenCaptureAccess() {
+        // 注意：CGPreflightScreenCaptureAccess 在 10.15 之前不存在，但部署目标是 13.0，
+        // 所以这里不需要再做版本判断。
+        return CGPreflightScreenCaptureAccess();
+    }
+
+    bool RequestScreenCaptureAccess() {
+        // 弹系统授权框。用户点了"允许"也只是把 App 加进列表，**本进程仍然拿不到权限**，
+        // 必须重启 App 才生效——调用方必须把这句话告诉用户。
+        return CGRequestScreenCaptureAccess();
+    }
+
+    // ------------------------------------------------------------------
+    // TUN 停止握手（P0-3）
+    // ------------------------------------------------------------------
+
+    qint64 ReadTunRootPid() {
+        QFile f(QDir(ConfigDir()).absoluteFilePath(TUN_PID_FILE));
+        if (!f.open(QIODevice::ReadOnly)) return 0;
+        bool ok = false;
+        const auto pid = f.readAll().trimmed().toLongLong(&ok);
+        return (ok && pid > 0) ? pid : 0;
+    }
+
+    bool RequestTunStopBySentinel() {
+        // 哨兵（vpn-run-root-macos.sh 里的 while 循环）以 root 跑，它看到这个文件
+        // 就会自己 SIGTERM 内核。GUI 只负责建个文件——用户对自己的数据目录有写权限，
+        // 所以这里**不需要任何提权**，也就不会再弹密码（这正是 P0-3 的修法）。
+        //
+        // 文件内容必须是**当前内核 pid**：脚本会校验，只认自己的。
+        // 这样即使上一次崩溃留下旧标记，也不会把新内核刚起来就杀掉（实测踩过）。
+        const auto pid = ReadTunRootPid();
+        if (pid == 0) return false; // 哨兵没在跑（旧脚本/已被强杀）
+
+        QFile f(QDir(ConfigDir()).absoluteFilePath(TUN_STOP_REQUEST_FILE));
+        if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+            qDebug() << "[mac] cannot create stop request:" << f.errorString();
+            return false;
+        }
+        f.write(QByteArray::number(pid));
+        f.close();
+        return true;
+    }
+
+    bool WaitTunExit(int timeoutMs) {
+        // 哨兵收到请求后：SIGTERM → 最多等 6 秒 → SIGKILL，然后删 pid 文件。
+        // 所以"pid 文件消失"就是"内核确实退了"的信号。
+        QElapsedTimer t;
+        t.start();
+        while (t.elapsed() < timeoutMs) {
+            if (ReadTunRootPid() == 0) return true;
+            QThread::msleep(100);
+        }
+        return ReadTunRootPid() == 0;
     }
 
 } // namespace NekoGui_mac

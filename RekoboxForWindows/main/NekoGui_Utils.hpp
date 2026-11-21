@@ -159,6 +159,11 @@ void ActivateWindow(QWidget *w);
 
 void runOnUiThread(const std::function<void()> &callback, QObject *parent = nullptr);
 
+// 明确"投递到指定线程执行"。与 runOnUiThread(cb, parent) 的区别是意图清晰：
+// 后者被传 QThread* 时行为是"投递到该线程"（历史上被误当成 UI 线程用，见 P0-2）。
+// 需要跨线程跑的东西一律用这个，别再靠 parent 的类型去猜。
+void runOnThread(class QThread *thread, const std::function<void()> &callback);
+
 void runOnNewThread(const std::function<void()> &callback);
 
 template<typename EMITTER, typename SIGNAL, typename RECEIVER, typename ReceiverFunc>

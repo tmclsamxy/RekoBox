@@ -17,6 +17,8 @@
 #include "3rdparty/qv2ray/v2/components/proxy/QvProxyConfigurator.hpp"
 
 #include "ui/mainwindow_interface.h"
+#include "ui/ThemeManager.hpp"
+#include "main/AppLog.hpp"
 
 #ifdef Q_OS_WIN
 #include "sys/windows/MiniDump.h"
@@ -98,7 +100,15 @@ int main(int argc, char* argv[]) {
     QApplication::setAttribute(Qt::AA_DisableWindowContextHelpButton);
 #endif
 #if QT_VERSION >= QT_VERSION_CHECK(5, 7, 0)
+#ifndef Q_OS_MACOS
+    // P2-14：mac 上放开原生对话框。
+    //
+    // Windows 上保留 Qt 自绘是为了跟界面观感统一，但 mac 上代价不同：
+    // 自绘的文件选择器没有 iCloud Drive、没有标签页、没有"最近使用"、
+    // 不能拖放、不认 Cmd+Shift+G 输入路径——用户会直接判定"这软件不像 Mac 应用"。
+    // 而且 Qt 在 mac 上的原生 panel（NSOpenPanel）行为稳定，放开没有副作用。
     QApplication::setAttribute(Qt::AA_DontUseNativeDialogs);
+#endif
 #endif
     QApplication::setQuitOnLastWindowClosed(false);
     auto preQApp = new QApplication(argc, argv);
@@ -164,9 +174,17 @@ int main(int argc, char* argv[]) {
     delete preQApp;
     QApplication a(argc, argv);
 
+    // 日志落盘：越早装越好，这样连"数据目录建不出来"这种早期问题也有记录。
+    // 必须在 QApplication 之后（要用 applicationName / Version）。
+    NekoGui_log::Install();
+
 #ifdef Q_OS_MACOS
     // 固定 Fusion + 系统字体：与 Windows 版观感一致（详见 docs/06-macos-port.md §9.1）
     NekoGui_mac::ApplyLook();
+
+    // 系统在深色/浅色之间切换时重建调色板（只在主题为 System 时真的做事）。
+    // 必须在 QApplication 之后、MainWindow 之前挂上，否则首帧可能用错外观。
+    themeManager->WatchSystemAppearance();
 #endif
 
     // 上次被强杀（kill -9 / 崩溃）会留下指向 127.0.0.1 的系统代理，整机表现为断网。
@@ -355,5 +373,11 @@ int main(int argc, char* argv[]) {
     });
 
     UI_InitMainWindow();
-    return QApplication::exec();
+
+    // 把日志路径写进日志本身：用户报问题让他"把日志发来"时，他会先来这里找路径
+    qInfo() << "[app] log file:" << NekoGui_log::LogFilePath();
+
+    const int rc = QApplication::exec();
+    NekoGui_log::Flush();
+    return rc;
 }

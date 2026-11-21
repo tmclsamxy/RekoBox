@@ -32,6 +32,10 @@ namespace NekoGui_mac {
     // enable=true 时落盘快照后改；false 按快照还原（原本 DHCP 的还原成 Empty）。
     void ApplyTunDNS(bool enable);
 
+    // 指定接管地址的版本：TUN 内核监听 127.0.0.1:53 之后，这里传 "127.0.0.1"。
+    // 保留 address 参数是为了兼容旧快照还原与灰度（早期版本写的是 172.19.0.2）。
+    void ApplyTunDNS(bool enable, const QString &address);
+
     // 启动时清理上次异常退出（崩溃 / 强杀）留下的 DNS 改动，否则整机解析不了域名
     void RecoverTunDNSIfNeeded();
 
@@ -43,5 +47,34 @@ namespace NekoGui_mac {
     // 顺序：显式配置的 DNS > 系统当前解析器 > 223.5.5.5。
     // 绝不能返回 127.0.0.1 —— 接管后那就是它自己，会自环。
     QString TunDNSUpstream();
+
+    // 「从屏幕导入二维码」需要"屏幕录制"权限（macOS 10.15+）。没有权限时
+    // QScreen::grabWindow 不报错，只是返回一张**不含任何窗口内容**的图（只剩壁纸），
+    // 于是二维码永远识别不到、每次都弹 "QR Code not found"。
+    // HasScreenCaptureAccess 只查询不弹框（CGPreflightScreenCaptureAccess）；
+    // RequestScreenCaptureAccess 会弹系统授权框（CGRequestScreenCaptureAccess），
+    // 且授权后必须重启进程才生效——所以调用方要先提示用户。
+    bool HasScreenCaptureAccess();
+
+    bool RequestScreenCaptureAccess();
+
+    // ------------------------------------------------------------------
+    // TUN 停止握手（P0-3：不再二次弹管理员密码）
+    //
+    // res/vpn/vpn-run-root-macos.sh 以 root 起来后自己盯一个哨兵循环：
+    //   config/tun-root.pid        当前 tun 内核 PID
+    //   config/tun-stop-request    GUI 建这个文件 = "请停"
+    // 哨兵是 root，所以它能 SIGTERM 内核；GUI 建文件不需要提权。
+    //
+    // RequestTunStopBySentinel 只负责投递请求（不阻塞、不提权）。
+    // WaitTunExit 轮询 pid 文件消失，确认内核真的退了（脚本里 SIGTERM→6 秒→SIGKILL）。
+    // 两者配合就只有"启动"那一次密码，对齐 Windows 的体验。
+    // ------------------------------------------------------------------
+
+    qint64 ReadTunRootPid();
+
+    bool RequestTunStopBySentinel();
+
+    bool WaitTunExit(int timeoutMs);
 
 } // namespace NekoGui_mac

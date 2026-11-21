@@ -196,6 +196,42 @@ step "ad-hoc 签名"
 # 早期构建会在 bundle 里留一个断链的 updater -> launcher（Linux 才需要），
 # 断链符号链接会让 codesign --deep 校验失败（真机报"已损坏"），每次构建清掉
 rm -f "$APP/Contents/MacOS/updater"
+
+# dSYM 是**调试产物**，不能进分发包：
+#   1. 占 30 MB（几乎和内核一样大），用户白下；
+#   2. 里面含完整符号表，等于把内部函数名与行号一起发出去。
+# 它由 CMake 的 post-build dsymutil 生成在 exe 旁边，这里移到 dist 归档，
+# 打完包再放回去（本地调试仍然可用）。
+DSYM="$APP/Contents/MacOS/RekoBox.dSYM"
+DSYM_BACKUP=""
+if [ -d "$DSYM" ]; then
+    mkdir -p "$DIST"
+    DSYM_ARCHIVE="$DIST/RekoBox-$NKR_VERSION-mac-arm64.dSYM"
+    rm -rf "$DSYM_ARCHIVE"
+    ditto "$DSYM" "$DSYM_ARCHIVE"
+    DSYM_BACKUP="$(mktemp -d "${TMPDIR:-/tmp}/rekobox-dsym.XXXXXX")"
+    mv "$DSYM" "$DSYM_BACKUP/RekoBox.dSYM"
+    echo "dSYM 已移出 bundle（归档到 $DSYM_ARCHIVE）"
+fi
+# 无论后面成功与否，退出时都把 dSYM 放回去，避免污染本地构建目录
+restore_dsym() {
+    if [ -n "$DSYM_BACKUP" ] && [ -d "$DSYM_BACKUP/RekoBox.dSYM" ]; then
+        rm -rf "$DSYM"
+        mv "$DSYM_BACKUP/RekoBox.dSYM" "$DSYM"
+        rmdir "$DSYM_BACKUP" 2>/dev/null || true
+    fi
+}
+
+# 唯一的 EXIT 收尾点：还原 dSYM + 删 dmg 临时目录。
+# 不要在别处再写 trap ... EXIT ——bash 的 EXIT trap 是覆盖语义，
+# 写两次只有最后一次生效（原来 dmg 段落那句就把 dSYM 还原顶掉了）。
+cleanup() {
+    restore_dsym
+    if [ -n "${STAGE:-}" ] && [ -d "${STAGE:-}" ]; then rm -rf "$STAGE"; fi
+}
+STAGE=""
+trap 'cleanup' EXIT
+
 codesign --force --sign - "$APP/Contents/MacOS/rekobox_core"
 codesign --force --deep --sign - "$APP"
 codesign -dv --verbose=2 "$APP" 2>&1 | head -5 || true
@@ -209,8 +245,11 @@ if [ "$DO_DMG" = "1" ]; then
 
     # 铺一个临时目录：app + /Applications 快捷方式，用户拖一下就装好。
     # 用 ditto 而不是 cp -R：后者会丢扩展属性，签名跟着一起坏。
+    #
+    # ⚠️ 不要在这里再写 `trap 'rm -rf "$STAGE"' EXIT`：bash 的 EXIT trap 是**覆盖**
+    # 而不是追加，上面那个 restore_dsym 会被顶掉，dSYM 就永久留在 bundle 里了。
+    # 统一在 STAGE 变量上做收尾（见文件末尾的 cleanup）。
     STAGE="$(mktemp -d "${TMPDIR:-/tmp}/rekobox-dmg.XXXXXX")"
-    trap 'rm -rf "$STAGE"' EXIT
     ditto "$APP" "$STAGE/RekoBox.app"
     ln -s /Applications "$STAGE/Applications"
 

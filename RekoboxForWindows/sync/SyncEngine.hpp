@@ -63,8 +63,11 @@ namespace NekoGui_sync {
         // 注销：吊销服务端令牌并清掉本地会话与落地记录
         void logout();
 
-        // 立即拉取；reason 只用于日志
-        void syncNow(const QString &reason);
+        // 立即拉取；reason 只用于日志。
+        // force = true 时忽略本地缓存的版本号，强制全量拉一次（用户手动点击"立即拉取"）。
+        // 不能只靠服务端版本号判断：版本没变时服务端会回 unchanged，
+        // 客户端就什么都拿不到，表现为"点了没反应"。
+        void syncNow(const QString &reason, bool force = false);
 
         // 只读模式：本地改动不再上传。保留空实现供 db 层回调调用。
         void noteLocalChange();
@@ -87,7 +90,11 @@ namespace NekoGui_sync {
 
         void prepareApi();
 
-        void runPull(int attempt);
+        void runPull(int attempt, bool force = false);
+
+        // 本地是否缺了服务端已知的节点（用户手动删过、或配置目录被清过）。
+        // 这种情况下服务端回 unchanged 就等于永远补不回来，必须强制全量重拉。
+        [[nodiscard]] bool HasMissingLocalNodes() const;
 
         // 把服务端节点池应用到本地，返回统计
         PullStats applyNodes(qint64 version, const QJsonArray &nodes);
@@ -112,7 +119,11 @@ namespace NekoGui_sync {
         bool inited = false;
         bool pulling_ = false;
         bool queued_ = false;
+        bool queuedForce_ = false; // 排队那一轮是否为强制全量
         bool applying_ = false;
+        // 上次「因本地缺节点而强制重拉」的时间，用作 30s 节流。
+        // 没有它，一条解析不了的节点会让 unchanged→强制重拉→unchanged 无限循环。
+        qint64 lastRepairAt = 0;
         int retryDelayMs = 5000;
         State current = State::LoggedOut;
     };

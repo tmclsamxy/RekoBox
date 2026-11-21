@@ -1,15 +1,15 @@
 #include "AutoRun.hpp"
 
 #include <QApplication>
+#include <QDebug>
 #include <QDir>
 
 #include "3rdparty/fix_old_qt.h"
 #include "main/NekoGui.hpp"
 
-// macOS headers (possibly OBJ-c)
+// macOS：登录项走 SMAppService（ObjC++，见 sys/macos/AutoRunMac.mm）
 #if defined(Q_OS_MACOS)
-#include <CoreFoundation/CoreFoundation.h>
-#include <CoreServices/CoreServices.h>
+#include "sys/macos/AutoRunMac.hpp"
 #endif
 
 #ifdef Q_OS_WIN
@@ -23,7 +23,7 @@ QString Windows_GenAutoRunString() {
     return appPath;
 }
 
-void AutoRun_SetEnabled(bool enable) {
+bool AutoRun_SetEnabled(bool enable) {
     // 以程序名称作为注册表中的键
     // 根据键获取对应的值（程序路径）
     auto appPath = QApplication::applicationFilePath();
@@ -37,6 +37,8 @@ void AutoRun_SetEnabled(bool enable) {
     } else {
         settings.remove(name);
     }
+    // 写注册表几乎不会失败；返回 status 复核结果，保证"设置成功"= 真的已启用
+    return settings.status() == QSettings::NoError;
 }
 
 bool AutoRun_IsEnabled() {
@@ -51,94 +53,69 @@ bool AutoRun_IsEnabled() {
     return settings.value(name).toString() == Windows_GenAutoRunString();
 }
 
+int AutoRun_Status() {
+    // Windows 只有"写了 / 没写"两态，没有待批准一说
+    return AutoRun_IsEnabled() ? 1 : 0;
+}
+
 #endif
 
 #ifdef Q_OS_MACOS
 
-void AutoRun_SetEnabled(bool enable) {
-    // From
-    // https://github.com/nextcloud/desktop/blob/master/src/common/utility_mac.cpp
-    QString filePath = QDir(QCoreApplication::applicationDirPath() + QLatin1String("/../..")).absolutePath();
-    CFStringRef folderCFStr = CFStringCreateWithCString(0, filePath.toUtf8().data(), kCFStringEncodingUTF8);
-    CFURLRef urlRef = CFURLCreateWithFileSystemPath(0, folderCFStr, kCFURLPOSIXPathStyle, true);
-    LSSharedFileListRef loginItems = LSSharedFileListCreate(0, kLSSharedFileListSessionLoginItems, 0);
+// 为什么整段换掉而不是继续修 LSSharedFileList：
+//
+//   2026-11-20 本机实测（macOS 15.7.5 / arm64）：调用 LSSharedFileListInsertItemURL
+//   **直接返回 NULL**，登录项列表里从来不会出现我们这一项（snapshot 前后都是同样条目）。
+//   也就是说旧实现的失效原因不是"写入成功但系统不认"（报告里的推测），
+//   而是整个 API 已经不能用了——只修 CFRelease 泄漏，功能仍然是坏的。
+//
+// 改用 macOS 13+ 的 SMAppService.mainAppService（实现在 sys/macos/AutoRunMac.mm）：
+//   不需要 root、不需要特权助手，App 自己登进「系统设置 → 通用 → 登录项」。
+//
+// 与 Windows 的差异：mainAppService 拉起 App 时**不能带命令行参数**，所以无法照抄
+// Windows 的 "…\rekobox.exe" -tray。开机静默进托盘改由 start_minimal 表达：
+// 勾上自启时顺手把它打开，效果等同于 Windows 的 -tray（不弹主窗口，只留托盘图标）。
 
-    if (loginItems && enable) {
-        // Insert an item to the list.
-        LSSharedFileListItemRef item =
-            LSSharedFileListInsertItemURL(loginItems, kLSSharedFileListItemLast, 0, 0, urlRef, 0, 0);
-
-        if (item) CFRelease(item);
-
-        CFRelease(loginItems);
-    } else if (loginItems && !enable) {
-        // We need to iterate over the items and check which one is "ours".
-        UInt32 seedValue;
-        CFArrayRef itemsArray = LSSharedFileListCopySnapshot(loginItems, &seedValue);
-        CFStringRef appUrlRefString = CFURLGetString(urlRef);
-
-        for (int i = 0; i < CFArrayGetCount(itemsArray); i++) {
-            LSSharedFileListItemRef item = (LSSharedFileListItemRef) CFArrayGetValueAtIndex(itemsArray, i);
-            CFURLRef itemUrlRef = NULL;
-
-            if (LSSharedFileListItemResolve(item, 0, &itemUrlRef, NULL) == noErr && itemUrlRef) {
-                CFStringRef itemUrlString = CFURLGetString(itemUrlRef);
-
-                if (CFStringCompare(itemUrlString, appUrlRefString, 0) == kCFCompareEqualTo) {
-                    LSSharedFileListItemRemove(loginItems, item); // remove it!
-                }
-
-                CFRelease(itemUrlRef);
-            }
-        }
-
-        CFRelease(itemsArray);
-        CFRelease(loginItems);
+// 返回 false 表示"没设置成功"，调用方应当把勾选框复位并提示原因。
+// SMAppService 的 mainAppService 只认**位于 /Applications** 的 App：
+// 直接跑 RekoBoxForMac/build/RekoBox.app（开发调试）时状态恒为 NotFound，
+// 这时勾选框会出现"勾了又跳回去"——要在界面上说清原因，别让它看起来像 bug。
+bool AutoRun_SetEnabled(bool enable) {
+    // 登录项传不了参数 → 用"启动时不显示面板"这条设置替代 Windows 的 -tray。
+    // 只在开启时改，关掉自启不反向覆盖用户的界面偏好。
+    if (enable && !NekoGui::dataStore->start_minimal) {
+        NekoGui::dataStore->start_minimal = true;
+        NekoGui::dataStore->Save();
+        qDebug() << "[mac] autorun enabled, start_minimal -> true (mainAppService takes no args)";
     }
 
-    CFRelease(folderCFStr);
-    CFRelease(urlRef);
+    if (!NekoGui_mac::AutoRun_SetEnabled(enable)) {
+        qDebug() << "[mac] autorun set failed, status:" << NekoGui_mac::AutoRun_Status();
+        return false;
+    }
+
+    // 系统可能返回 RequiresApproval：登记成功，但要用户在系统设置里点一下才生效。
+    // 这种情况算"设置成功"（勾选框保持勾上），提示由界面层负责。
+    return true;
+}
+
+// 0 = 没开；1 = 已开；2 = 已登记但需用户在系统设置里批准。
+// 原来只返回 bool，把"需批准"和"未开"混为一谈，于是界面在两种情况下都显示未勾选。
+int AutoRun_Status() {
+    switch (NekoGui_mac::AutoRun_Status()) {
+        case NekoGui_mac::AutoRun_Enabled:
+            return 1;
+        case NekoGui_mac::AutoRun_RequiresApproval:
+            return 2;
+        default:
+            return 0;
+    }
 }
 
 bool AutoRun_IsEnabled() {
-    // From
-    // https://github.com/nextcloud/desktop/blob/master/src/common/utility_mac.cpp
-    // this is quite some duplicate code with setLaunchOnStartup, at some
-    // point we should fix this FIXME.
-    bool returnValue = false;
-    QString filePath = QDir(QCoreApplication::applicationDirPath() + QLatin1String("/../..")).absolutePath();
-    CFStringRef folderCFStr = CFStringCreateWithCString(0, filePath.toUtf8().data(), kCFStringEncodingUTF8);
-    CFURLRef urlRef = CFURLCreateWithFileSystemPath(0, folderCFStr, kCFURLPOSIXPathStyle, true);
-    LSSharedFileListRef loginItems = LSSharedFileListCreate(0, kLSSharedFileListSessionLoginItems, 0);
-
-    if (loginItems) {
-        // We need to iterate over the items and check which one is "ours".
-        UInt32 seedValue;
-        CFArrayRef itemsArray = LSSharedFileListCopySnapshot(loginItems, &seedValue);
-        CFStringRef appUrlRefString = CFURLGetString(urlRef); // no need for release
-
-        for (int i = 0; i < CFArrayGetCount(itemsArray); i++) {
-            LSSharedFileListItemRef item = (LSSharedFileListItemRef) CFArrayGetValueAtIndex(itemsArray, i);
-            CFURLRef itemUrlRef = NULL;
-
-            if (LSSharedFileListItemResolve(item, 0, &itemUrlRef, NULL) == noErr && itemUrlRef) {
-                CFStringRef itemUrlString = CFURLGetString(itemUrlRef);
-
-                if (CFStringCompare(itemUrlString, appUrlRefString, 0) == kCFCompareEqualTo) {
-                    returnValue = true;
-                }
-
-                CFRelease(itemUrlRef);
-            }
-        }
-
-        CFRelease(itemsArray);
-    }
-
-    CFRelease(loginItems);
-    CFRelease(folderCFStr);
-    CFRelease(urlRef);
-    return returnValue;
+    // RequiresApproval 也算"用户选了自启"（只是还没在系统设置里批准），
+    // 勾选框要保持勾上，否则又会出现"勾了会跳回去"的观感。
+    return NekoGui_mac::AutoRun_IsEnabled();
 }
 
 #endif
@@ -163,7 +140,7 @@ QString getUserAutostartDir_private() {
     return config;
 }
 
-void AutoRun_SetEnabled(bool enable) {
+bool AutoRun_SetEnabled(bool enable) {
     // From https://github.com/nextcloud/desktop/blob/master/src/common/utility_unix.cpp
     QString appName = QCoreApplication::applicationName();
     QString userAutoStartPath = getUserAutostartDir_private();
@@ -192,7 +169,7 @@ void AutoRun_SetEnabled(bool enable) {
         if (!QDir().exists(userAutoStartPath) && !QDir().mkpath(userAutoStartPath)) {
             // qCWarning(lcUtility) << "Could not create autostart folder"
             // << userAutoStartPath;
-            return;
+            return false;
         }
 
         QFile iniFile(desktopFileLocation);
@@ -200,7 +177,7 @@ void AutoRun_SetEnabled(bool enable) {
         if (!iniFile.open(QIODevice::WriteOnly)) {
             // qCWarning(lcUtility) << "Could not write auto start entry" <<
             // desktopFileLocation;
-            return;
+            return false;
         }
 
         QTextStream ts(&iniFile);
@@ -217,8 +194,10 @@ void AutoRun_SetEnabled(bool enable) {
            << QLatin1String("X-GNOME-Autostart-enabled=") << "true" << NEWLINE;
         ts.flush();
         iniFile.close();
+        return QFile::exists(desktopFileLocation);
     } else {
         QFile::remove(desktopFileLocation);
+        return !QFile::exists(desktopFileLocation);
     }
 }
 
@@ -226,6 +205,11 @@ bool AutoRun_IsEnabled() {
     QString appName = QCoreApplication::applicationName();
     QString desktopFileLocation = getUserAutostartDir_private() + appName + QLatin1String(".desktop");
     return QFile::exists(desktopFileLocation);
+}
+
+int AutoRun_Status() {
+    // Linux 只有"文件在 / 不在"两态
+    return AutoRun_IsEnabled() ? 1 : 0;
 }
 
 #endif

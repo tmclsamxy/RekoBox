@@ -271,33 +271,49 @@ namespace NekoGui_sync {
 
     // ---- 拉取主流程 ----
 
-    void SyncEngine::syncNow(const QString &reason) {
+    void SyncEngine::syncNow(const QString &reason, bool force) {
         if (!state.loggedIn()) {
             setState(State::LoggedOut);
             return;
         }
         if (pulling_) {
+            // 正在拉的时候用户又点了：记下来，这一轮结束后再补一次。
+            // 强制请求优先——否则用户点了"立即拉取"却只等到一个 unchanged。
             queued_ = true;
+            if (force) queuedForce_ = true;
             return;
         }
         pulling_ = true;
         retryTimer.stop();
         setState(State::Pulling);
-        qDebug() << "[sync] pull start:" << reason;
-        runPull(0);
+        qDebug() << "[sync] pull start:" << reason << (force ? "(force)" : "");
+        runPull(0, force);
     }
 
-    void SyncEngine::runPull(int attempt) {
+    void SyncEngine::runPull(int attempt, bool force) {
         prepareApi();
         auto path = QStringLiteral("/api/v1/nodes");
-        if (state.lastVersion > 0) path += QStringLiteral("?version=%1").arg(state.lastVersion);
+        // force：不带 version，服务端必定走全量分支
+        if (!force && state.lastVersion > 0) path += QStringLiteral("?version=%1").arg(state.lastVersion);
 
-        api->get(path, [this, attempt](const ApiResult &r) {
+        api->get(path, [this, attempt, force](const ApiResult &r) {
             if (!r.ok()) {
                 finishFail(r);
                 return;
             }
             if (r.body.value("unchanged").toBool()) {
+                // 服务端说版本没变。这只能说明它那边没改动，不能说明本机还是完好的：
+                // 用户可能删过节点、配置目录也可能被清过。发现本地缺东西就立刻强制拉一次，
+                // 否则本地会永远停在这个缺口上。
+                const bool throttled = NowMs() - lastRepairAt < 30000;
+                if (HasMissingLocalNodes() && !throttled) {
+                    lastRepairAt = NowMs();
+                    qDebug() << "[sync] unchanged 但本地缺节点，强制全量重拉";
+                    // 直接重跑本轮：pulling_ 仍为 true，不会与用户点击并发，
+                    // 也不会走 syncNow 的排队逻辑产生多余的第三次请求。
+                    runPull(0, true);
+                    return;
+                }
                 finishOk(PullStats{}, true);
                 return;
             }
@@ -306,6 +322,16 @@ namespace NekoGui_sync {
             const auto stats = applyNodes(version, nodes);
             finishOk(stats, false);
         });
+    }
+
+    // 本地落地记录里有 sync_id，但对应的实体已经不在了（用户手动删了、配置目录被清过）。
+    // 这是唯一需要绕过服务端 unchanged 判断的信号。
+    bool SyncEngine::HasMissingLocalNodes() const {
+        for (auto it = state.nodes.constBegin(); it != state.nodes.constEnd(); ++it) {
+            const auto ent = FindProfileBySync(it.value().syncId);
+            if (ent == nullptr || !ent->bean) return true;
+        }
+        return false;
     }
 
     PullStats SyncEngine::applyNodes(qint64 version, const QJsonArray &nodes) {
@@ -342,6 +368,10 @@ namespace NekoGui_sync {
             auto fresh = ProfileFromLink(link);
             if (!fresh) {
                 st.skipped++;
+                // 解析不了且本地没有对应实体：这条记录永远无法落地，
+                // 留着它会让 HasMissingLocalNodes() 恒为真，触发无休止的强制重拉。
+                // 直接丢掉引用；管理员修好链接后服务端版本会变，届时自然会重新建。
+                if (ent == nullptr) state.nodes.remove(id);
                 qDebug() << "[sync] 跳过无法解析的节点:" << o.value("name").toString() << link.left(48);
                 continue;
             }
@@ -463,6 +493,11 @@ namespace NekoGui_sync {
     void SyncEngine::finishOk(const PullStats &stats, bool unchanged) {
         pulling_ = false;
         state.lastError.clear();
+        if (unchanged) {
+            // 服务端确认版本没变，等于本次拉取有效：刷新确认时间，
+            // 否则用户手动点"立即拉取"后界面的"上次拉取"纹丝不动，看起来像没生效。
+            state.lastSyncAt = NowMs();
+        }
         state.saveState();
         retryDelayMs = 5000;
         retryTimer.stop();
@@ -483,13 +518,16 @@ namespace NekoGui_sync {
 
         if (queued_) {
             queued_ = false;
-            QTimer::singleShot(300, this, [this] { syncNow("queued"); });
+            const bool force = queuedForce_;
+            queuedForce_ = false;
+            QTimer::singleShot(300, this, [this, force] { syncNow("queued", force); });
         }
     }
 
     void SyncEngine::finishFail(const ApiResult &r) {
         pulling_ = false;
         queued_ = false;
+        queuedForce_ = false;
 
         if (r.status == 401) {
             // 令牌失效（服务端删号 / 改口令 / 禁用）：清会话，退回本地模式，不动本地节点

@@ -3,7 +3,10 @@
 > 写给下一个开发会话（也写给三个月后的自己）。
 > 读完这一页就能接着干，不需要回看聊天记录。
 >
-> 最后更新：2026-11-20 · 代码在 Windows 上写、打包，开发机换到 MacBook Air M2
+> 最后更新：2026-11-21 · 代码在 Windows 上写、打包，开发机换到 MacBook Air M2
+>
+> 修复记录：`BATCH1-FIXES.md` / `BATCH2-FIXES.md` / `BATCH3-FIXES.md` /
+> `FIX-MANUAL-PULL.md`（「立即拉取」点击无效，2026-11-21）
 
 ---
 
@@ -357,6 +360,8 @@ RekoboxForWindows/                 ← 桌面共享树（Windows 正式版就靠
 │   └── macos/MacPlatform.*        ← 数据目录 / Fusion / 转义；以后加 NSWorkspace、模板图
 ├── res/vpn/vpn-run-root-macos.sh  ← TUN 启动脚本（qrc 里已登记）
 ├── db/ConfigBuilder.cpp           ← 生成 tun 配置 + 选脚本（genTunName 在这里）
+├── sync/                           ← 云端节点订阅：SyncEngine（拉取流程）/ SyncApi / SyncStore
+├── ui/dialog_account.cpp          ← 「账号与节点订阅」对话框（登录/注销/立即拉取）
 ├── ui/mainwindow.cpp              ← 托盘、TUN 启停、状态栏
 ├── main/main.cpp                  ← 数据目录、外观、单实例
 └── libs/build_macos.sh            ← 一键构建，改这里加步骤

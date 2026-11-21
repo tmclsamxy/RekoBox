@@ -44,9 +44,9 @@ step() { echo; echo "==> $*"; }
 
 [ "$(uname -s)" = "Darwin" ] || die "这个脚本只能在 macOS 上跑"
 for c in cmake ninja go codesign; do
-    command -v "$c" >/dev/null 2>&1 || die "缺少 $c（xcode-select --install / brew install $c）"
+    command -v "$c" >/dev/null 2>&1 || die "缺少 ${c}（xcode-select --install / brew install ${c}）"
 done
-[ -x "$QT_PREFIX/bin/qmake" ] || die "Qt 不在 $QT_PREFIX，用 --qt 指定，或先 aqt install-qt mac desktop 6.7.2 clang_64"
+[ -x "$QT_PREFIX/bin/qmake" ] || die "Qt 不在 ${QT_PREFIX}，用 --qt 指定，或先 aqt install-qt mac desktop 6.7.2 clang_64"
 [ -x "$QT_PREFIX/bin/macdeployqt" ] || die "找不到 macdeployqt，Qt 组件不全（需要 qtbase qtsvg qttools）"
 
 NKR_VERSION="$(tr -d '\r\n' < "$ROOT/nekoray_version.txt")"
@@ -79,7 +79,7 @@ if [ -d "$SINGBOX_SRC" ]; then
 elif [ -f "$OUT/core/rekobox_core" ]; then
     echo "没找到 sing-box 源码树，沿用已有的 $OUT/core/rekobox_core"
 else
-    die "既没有 $SINGBOX_SRC，也没有 $OUT/core/rekobox_core。先跑 libs/get_source_local.sh 拉内核源码"
+    die "既没有 ${SINGBOX_SRC}，也没有 $OUT/core/rekobox_core。先跑 libs/get_source_local.sh 拉内核源码"
 fi
 
 # ---------------------------------------------------------------- 3. configure
@@ -102,7 +102,7 @@ elif command -v brew >/dev/null 2>&1; then
         if bp="$(brew --prefix "$p" 2>/dev/null)" && [ -d "$bp" ]; then
             PREFIX_PATH="$PREFIX_PATH;$bp"
         else
-            die "缺少依赖 $p（brew install $p），或先跑 libs/build_deps_macos.sh"
+            die "缺少依赖 ${p}（brew install ${p}），或先跑 libs/build_deps_macos.sh"
         fi
     done
     echo "依赖目录: Homebrew（注意 protobuf 版本可能比 Windows 端新）"
@@ -121,7 +121,7 @@ step "编译"
 ninja -C "$OUT"
 
 APP="$OUT/RekoBox.app"
-[ -d "$APP" ] || die "没有产出 $APP（检查 OUTPUT_NAME / MACOSX_BUNDLE 配置）"
+[ -d "$APP" ] || die "没有产出 ${APP}（检查 OUTPUT_NAME / MACOSX_BUNDLE 配置）"
 
 # ---------------------------------------------------------------- 5. 部署
 step "放入内核并部署 Qt 运行时"
@@ -211,7 +211,7 @@ if [ -d "$DSYM" ]; then
     ditto "$DSYM" "$DSYM_ARCHIVE"
     DSYM_BACKUP="$(mktemp -d "${TMPDIR:-/tmp}/rekobox-dsym.XXXXXX")"
     mv "$DSYM" "$DSYM_BACKUP/RekoBox.dSYM"
-    echo "dSYM 已移出 bundle（归档到 $DSYM_ARCHIVE）"
+    echo "dSYM 已移出 bundle（归档到 ${DSYM_ARCHIVE}）"
 fi
 # 无论后面成功与否，退出时都把 dSYM 放回去，避免污染本地构建目录
 restore_dsym() {

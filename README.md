@@ -21,7 +21,7 @@ Rekobox/
 |---|---|---|
 | **Android** | `RekoboxForAndroid/` | v1.0.1 已发布；`io.rekobox`，4 个 split ABI；改名基于 NekoBox |
 | **Windows** | `RekoboxForWindows/` | nekoray 4.0.1 移植：Qt6.7 + MinGW 构建通过，与 Android 共用 sing-box 内核（含 VLESS Encryption / Vision），已实机运行 |
-| **macOS** | `RekoboxForMac/` | Apple Silicon / arm64，**已在 M2（macOS 15.7.5）编译通过并启动**，界面一致；TUN / 系统代理待验证。方案 [`docs/06-macos-port.md`](docs/06-macos-port.md)，交接 [`RekoboxForMac/docs/HANDOFF.md`](RekoboxForMac/docs/HANDOFF.md)，效果图在 `RekoboxForMac/mockups/`。源码复用 `RekoboxForWindows/`（CMake 按平台分支，不复制副本） |
+| **macOS** | `RekoboxForMac/` | Apple Silicon / arm64，**mac-v1.0.16 已发布**（M2 / macOS 15.7.5 实机验证）：TUN、DNS 接管、免二次提权、深色主题跟随系统、开机自启（SMAppService）、崩溃根因已修。ad-hoc 签名，首次打开需右键→打开。方案 [`docs/06-macos-port.md`](docs/06-macos-port.md)，交接 [`RekoboxForMac/docs/HANDOFF.md`](RekoboxForMac/docs/HANDOFF.md)，效果图在 `RekoboxForMac/mockups/`。源码复用 `RekoboxForWindows/`（CMake 按平台分支，不复制副本） |
 
 ## 发布
 
@@ -30,6 +30,7 @@ Rekobox/
 | 平台 | 版本 | 产物 | 链接 |
 |---|---|---|---|
 | Android | v1.0.6 | 4 个 split APK | [releases/tag/v1.0.6](https://github.com/tmclsamxy/RekoBox/releases/tag/v1.0.6) |
+| macOS | mac-v1.0.16 | `Rekobox-1.0.16-mac-arm64.dmg` + `.zip`（Apple Silicon） | [releases/tag/mac-v1.0.16](https://github.com/tmclsamxy/RekoBox/releases/tag/mac-v1.0.16) |
 | Windows | win-v1.0.15 | `Rekobox-1.0.15-windows-x64-qt.zip` + `rekosync` 服务端 | [releases/tag/win-v1.0.15](https://github.com/tmclsamxy/RekoBox/releases/tag/win-v1.0.15) |
 | 服务端 | server-v2.1.0 | `rekosync` 单文件二进制（linux amd64/arm64/arm、windows amd64、darwin amd64/arm64）+ `SHA256SUMS` | [releases/tag/server-v2.1.0](https://github.com/tmclsamxy/RekoBox/releases/tag/server-v2.1.0) |
 

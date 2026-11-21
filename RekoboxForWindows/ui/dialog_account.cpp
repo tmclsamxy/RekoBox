@@ -210,5 +210,7 @@ void DialogAccount::onSyncClicked() {
     auto engine = NekoGui_sync::SyncEngine::instance();
     btnSync->setEnabled(false);
     labelStatus->setText(tr("正在拉取…"));
-    engine->syncNow("manual");
+    // 手动拉取一律强制全量：用户点这个按钮就是要"现在真的去拿一次"，
+    // 带上本地缓存的版本号会被服务端 unchanged 短路，点了等于没点。
+    engine->syncNow("manual", true);
 }

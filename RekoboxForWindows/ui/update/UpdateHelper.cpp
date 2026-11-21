@@ -3,6 +3,7 @@
 #include "main/NekoGui.hpp"
 
 #include <QApplication>
+#include <QDebug>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -26,11 +27,41 @@ namespace NekoGui_update {
 
     namespace {
 
-        // 仓库同时有 Android（v1.0.1）与 Windows（win-v1.0.4）两条发布线，
-        // tag 前缀是唯一可靠的区分方式；/releases/latest 会返回另一平台的包。
+        // 仓库同时有 Android（v1.0.1）、Windows（win-v1.0.4）、macOS（mac-v1.0.15）
+        // 三条发布线，tag 前缀是唯一可靠的区分方式；
+        // /releases/latest 会返回另一平台的包，所以必须拉列表自己筛。
+        //
+        // 原来这三行是硬编码 win-v / windows-x64-qt.zip / rekobox.exe，mac 上表现为
+        // "查到了更新、下载了 Windows 包、解压后找不到 rekobox.exe" 三重不匹配。
+#if defined(Q_OS_MACOS)
+        constexpr auto kTagPrefix = "mac-v";
+        constexpr auto kAssetKeyword = "mac-arm64";
+#elif defined(Q_OS_WIN)
         constexpr auto kTagPrefix = "win-v";
+        constexpr auto kAssetKeyword = "windows-x64-qt";
+#else
+        // Linux 版没有独立的发布线（用户一般自行编译 / 走发行版包管理）。
+        // 这里沿用 win-v 前缀 + 要求 linux-x64 资产名：两者不可能同时命中，
+        // 于是"检查更新"会稳定地回"没有可用的更新"，而不是像以前那样
+        // 拉到 Windows 包、解压、再报找不到 rekobox.exe。
+        // 真正的 Linux 更新通道（AppImage / 包管理器）留给后续批次。
+        constexpr auto kTagPrefix = "win-v";
+        constexpr auto kAssetKeyword = "linux-x64";
+#endif
+
         constexpr auto kApiReleases = "https://api.github.com/repos/tmclsamxy/RekoBox/releases?per_page=30";
-        constexpr auto kAssetKeyword = "windows-x64-qt.zip";
+
+        // macOS 只接受可拖拽安装的 dmg；zip 留给 CI 归档用，自动更新不碰它
+        // （zip 解压出来的 .app 直接替换正在运行的 bundle 会被 Gatekeeper 判为已损坏）。
+        bool assetAccepted(const QString &name) {
+            const auto lower = name.toLower();
+            if (!lower.contains(QString(kAssetKeyword))) return false;
+#if defined(Q_OS_MACOS)
+            return lower.endsWith(".dmg");
+#else
+            return lower.endsWith(".zip");
+#endif
+        }
 
         // 允许用环境变量覆盖接口地址：便于本地起一个假的 release 列表做端到端测试，
         // 默认仍走 GitHub。
@@ -100,6 +131,8 @@ namespace NekoGui_update {
             QNetworkReply *reply = nullptr;
             ReleaseInfo update;
             QString tempDir;
+            // 下载落盘的实际路径（update.dmg / update.zip），applyUpdate 用它
+            QString downloadPath;
             QProgressDialog *progress = nullptr;
             QFile *downloadFile = nullptr;
 
@@ -176,7 +209,7 @@ namespace NekoGui_update {
                         for (const auto &a: obj["assets"].toArray()) {
                             const auto asset = a.toObject();
                             const auto name = asset["name"].toString();
-                            if (name.contains(kAssetKeyword, Qt::CaseInsensitive)) {
+                            if (assetAccepted(name)) {
                                 candidate.assetName = name;
                                 candidate.assetUrl = asset["browser_download_url"].toString();
                                 candidate.assetSize = static_cast<qint64>(asset["size"].toDouble());
@@ -190,6 +223,8 @@ namespace NekoGui_update {
                 }
 
                 if (!found) {
+                    qDebug() << "[update] no release matched tag prefix" << QByteArray(kTagPrefix)
+                             << "with an asset matching" << QByteArray(kAssetKeyword);
                     if (manual) {
                         QMessageBox::information(parent, QObject::tr("检查更新"),
                                                  QObject::tr("没有可用的更新。"));
@@ -209,6 +244,9 @@ namespace NekoGui_update {
                 }
 
                 update = best;
+                // 出问题时（选错平台包 / 资产挑错）一眼能看出来，别只能靠猜
+                qDebug() << "[update] picked tag" << best.tag << "asset" << best.assetName
+                         << "platform filter" << QByteArray(kTagPrefix) << QByteArray(kAssetKeyword);
                 prompt();
             }
 
@@ -252,7 +290,18 @@ namespace NekoGui_update {
                 request.setHeader(QNetworkRequest::UserAgentHeader,
                                   QString("RekoBox/%1").arg(QString(NKR_VERSION)));
 
-                downloadFile = new QFile(QDir(tempDir).filePath("update.zip"));
+                // 下载落盘名必须保留原扩展名：mac 分支要 open 一个 dmg，Windows 分支要 Expand-Archive 一个 zip。
+                // 原来硬写成 update.zip，mac 上就会拿到一个后缀错的 dmg。
+                QString ext = QFileInfo(update.assetName).suffix().toLower();
+                if (ext.isEmpty()) {
+#if defined(Q_OS_MACOS)
+                    ext = "dmg";
+#else
+                    ext = "zip";
+#endif
+                }
+                downloadFile = new QFile(QDir(tempDir).filePath("update." + ext));
+                downloadPath = downloadFile->fileName();
                 if (!downloadFile->open(QIODevice::WriteOnly | QIODevice::Truncate)) {
                     delete downloadFile;
                     downloadFile = nullptr;
@@ -321,6 +370,8 @@ namespace NekoGui_update {
             }
 
             // 解压 zip 到 destDir，成功返回 true
+            // 只有 Windows 走"解压覆盖"这条路；mac/Linux 的资产是 dmg / 单文件，用不到它。
+#if defined(Q_OS_WIN)
             bool extractZip(const QString &zipPath, const QString &destDir) {
                 const auto scriptPath = QDir(tempDir).filePath("extract.ps1");
                 QFile script(scriptPath);
@@ -481,6 +532,66 @@ try {
                     qApp->quit();
                 }
             }
+#endif // Q_OS_WIN
+
+            // ---------- macOS：dmg 交给系统安装，不自己替换 bundle ----------
+            // 原来 mac 上走的是 Windows 那条路：解压 zip、找 rekobox.exe（必然失败），
+            // 而 exit_reason==1 又去 startDetached("./updater")——mac 上故意没建这个
+            // 软链接（会破坏 codesign），等于静默失败、App 直接退出不重启。
+#if defined(Q_OS_MACOS)
+            void applyUpdate() {
+                const auto dmgPath = downloadPath;
+                if (dmgPath.isEmpty() || !QFile::exists(dmgPath)) {
+                    QMessageBox::warning(parent, QObject::tr("更新"),
+                                         QObject::tr("更新包不存在，请重新检查更新。"));
+                    deleteLater();
+                    return;
+                }
+
+                // 不用自己挂载/替换 /Applications/RekoBox.app：
+                //   - 正在运行的 bundle 被原地替换，Gatekeeper 会判"已损坏"
+                //   - 挂载、拷贝都需要用户交互，交给系统安装器最省事
+                // 直接把 dmg 打开，让用户把 RekoBox 拖进 Applications（覆盖旧的）。
+                const bool ok = QProcess::startDetached("open", {dmgPath});
+                if (!ok) {
+                    QMessageBox::warning(parent, QObject::tr("更新"),
+                                         QObject::tr("无法打开更新包：\n%1\n\n"
+                                                     "可以在 Finder 里手动打开它并拖入「应用程序」文件夹。")
+                                             .arg(dmgPath));
+                    deleteLater();
+                    return;
+                }
+
+                QMessageBox::information(
+                    parent, QObject::tr("更新"),
+                    QObject::tr("已下载新版本（%1），安装盘已打开。\n\n"
+                                "请把 RekoBox 拖进「应用程序」文件夹覆盖旧版本，"
+                                "然后重新打开。\n\n"
+                                "RekoBox 现在会退出，未安装完成前请不要再次启动。")
+                        .arg(update.version));
+
+                // 走完整退出流程：停 TUN / 关系统代理 / 保存配置 / 结束后台内核。
+                // 直接 qApp->quit() 会把 rekobox_core 留在后台，它还占着本地端口。
+                if (!QMetaObject::invokeMethod(parent, "on_menu_exit_triggered", Qt::QueuedConnection)) {
+                    qApp->quit();
+                }
+            }
+#endif // Q_OS_MACOS
+
+            // ---------- Linux：没有发布通道 ----------
+            // Linux 版没有独立 release 线（见上面 kTagPrefix 的说明）。理论上
+            // assetAccepted() 永远不会命中，因此这里只是"不该走到"的兜底，
+            // 防止某个仓库同时挂了 windows-x64-qt.zip 与叫 *linux-x64* 的资产时
+            // 出现未定义符号（链接期）。
+#if !defined(Q_OS_WIN) && !defined(Q_OS_MACOS)
+            void applyUpdate() {
+                QMessageBox::information(
+                    parent, QObject::tr("更新"),
+                    QObject::tr("Linux 版暂不支持应用内自动更新。\n\n"
+                                "请从项目的 Release 页面下载并手动安装新版本。"));
+                deleteLater();
+            }
+#endif
 
             void fail(const QString &message) {
                 if (manual) {
@@ -504,6 +615,7 @@ try {
 
         // 只提示一次，避免每次启动都弹
         QFile::remove(logPath);
+#if defined(Q_OS_WIN)
         QMessageBox::warning(
             parent, QObject::tr("更新"),
             QObject::tr("上次更新没有完成，当前仍是 %1 版本。\n\n"
@@ -511,6 +623,14 @@ try {
                         "最常见的原因是内核 rekobox_core.exe 仍在后台运行，占着文件与端口。\n"
                         "关掉后台残留的 rekobox_core 进程后，再点一次「检查更新」即可重试。")
                 .arg(QString(NKR_VERSION), content));
+#else
+        // mac/Linux 不做"原地替换"，没有这类替换脚本可查；这条分支实际不会命中
+        // （不会被写入 rekobox-update.log），留着以保证三端行为一致。
+        QMessageBox::warning(
+            parent, QObject::tr("更新"),
+            QObject::tr("上次更新没有完成，当前仍是 %1 版本。\n\n原因：\n%2")
+                .arg(QString(NKR_VERSION), content));
+#endif
     }
 
     void CheckForUpdates(QWidget *parent, bool manual) {
